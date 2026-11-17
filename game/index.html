@@ -3,17 +3,109 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>Neon Bay — an open-world crime game</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #14101f; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eef1f5; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
+  .hidden { display: none !important; }
+
+  /* --- HUD --- */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #hud-top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; padding: 14px 18px; }
+  #hud-left { display: flex; flex-direction: column; gap: 8px; }
+  #hud-health { width: 220px; height: 16px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.35); border-radius: 3px; overflow: hidden; }
+  #hud-health-fill { height: 100%; width: 100%; background: #37c978; transition: width .2s; }
+  #hud-health-text { font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+  #hud-objective { max-width: 380px; font-size: 14px; font-weight: 600; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,.45); padding: 6px 10px; border-left: 3px solid #ffe600; border-radius: 2px; }
+  #hud-stars { font-size: 26px; letter-spacing: 4px; text-shadow: 0 2px 4px #000; }
+  #hud-right { text-align: right; text-shadow: 0 1px 3px #000; }
+  #hud-cash { font-size: 26px; font-weight: 800; color: #7cff00; }
+  #hud-rep { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+  #hud-clock { font-size: 15px; font-weight: 600; }
+  #hud-ammo { position: absolute; left: 18px; bottom: 16px; font-size: 14px; font-weight: 700; text-shadow: 0 1px 3px #000; }
+  #hud-hint { position: absolute; left: 18px; bottom: 40px; font-size: 12px; opacity: .85; text-shadow: 0 1px 3px #000; transition: opacity 1s; }
+  #minimap { position: absolute; right: 18px; bottom: 16px; width: 180px; height: 180px; border: 2px solid rgba(255,255,255,.4); border-radius: 4px; background: #101018; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+
+  #hud-banner { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #hud-banner.show { opacity: 1; }
+  #hud-banner-title { font-size: 40px; font-weight: 900; letter-spacing: 3px; color: #ffe600; text-shadow: 0 0 18px rgba(255,230,0,.6), 0 2px 6px #000; }
+  #hud-banner-sub { font-size: 16px; max-width: 560px; margin: 8px auto 0; text-shadow: 0 1px 4px #000; background: rgba(0,0,0,.5); padding: 8px 14px; border-radius: 4px; }
+  #hud-damage { position: fixed; inset: 0; pointer-events: none; z-index: 6; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(255,0,40,.55) 100%); }
+
+  /* --- Overlays --- */
+  .overlay { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(180deg, rgba(20,8,40,.82), rgba(10,6,24,.88)); }
+  .overlay h1 { font-size: 64px; margin: 0; letter-spacing: 6px; font-weight: 900; color: #00e5ff; text-shadow: 0 0 24px rgba(0,229,255,.7), 0 0 60px rgba(255,45,120,.5); }
+  .overlay h1 .pink { color: #ff2d78; text-shadow: 0 0 24px rgba(255,45,120,.8); }
+  .overlay h2 { font-size: 34px; margin: 0 0 10px; letter-spacing: 4px; font-weight: 900; color: #ffe600; text-shadow: 0 0 18px rgba(255,230,0,.6); }
+  .overlay p { max-width: 560px; font-size: 16px; line-height: 1.6; color: #d8d4e8; margin: 10px 0; }
+  .overlay .controls { font-size: 13px; color: #9a94b5; line-height: 1.9; margin: 14px 0; }
+  .overlay .controls b { color: #eef1f5; }
+  .overlay button { pointer-events: auto; cursor: pointer; font: inherit; font-size: 17px; font-weight: 800; letter-spacing: 1px; color: #101018; background: #ffe600; border: 0; border-radius: 4px; padding: 13px 30px; margin: 6px; box-shadow: 0 0 18px rgba(255,230,0,.45); }
+  .overlay button:hover { background: #fff06a; }
+  .overlay button.secondary { background: transparent; color: #eef1f5; border: 2px solid rgba(255,255,255,.5); box-shadow: none; }
+  .overlay button:disabled { opacity: .35; cursor: default; }
+  .overlay .tag { font-size: 13px; letter-spacing: 2px; color: #ff2d78; font-weight: 700; }
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
+<canvas id="game" aria-label="Neon Bay: an open-world crime game. Drive, steal cars, outrun the police and run Mara's jobs."></canvas>
+
+<div id="hud">
+  <div id="hud-top">
+    <div id="hud-left">
+      <div id="hud-health"><div id="hud-health-fill"></div></div>
+      <div id="hud-health-text">100</div>
+      <div id="hud-objective">Find the yellow marker to start the next job.</div>
+    </div>
+    <div id="hud-stars">☆☆☆☆☆</div>
+    <div id="hud-right">
+      <div id="hud-cash">$0</div>
+      <div id="hud-rep">REP 0</div>
+      <div id="hud-clock">18:20</div>
+    </div>
+  </div>
+  <div id="hud-hint">WASD move/drive · E enter/exit car · F punch · Click/G shoot · Space jump · Shift sprint · H horn · Esc pause · Drag mouse to look</div>
+  <div id="hud-ammo">NO GUN — F TO PUNCH</div>
+  <canvas id="minimap" width="180" height="180"></canvas>
+  <div id="hud-banner"><div id="hud-banner-title"></div><div id="hud-banner-sub"></div></div>
+</div>
+<div id="hud-damage"></div>
+
+<div id="menu" class="overlay">
+  <div class="tag">A NEON COASTAL CITY · YOUR OWN STORY</div>
+  <h1>NEON <span class="pink">BAY</span></h1>
+  <p>Rico Vega is back in Neon Bay with nothing but the shirt on his back. Mara Solano, the fixer who runs the night, has work: steal a car, run the packages, and finally take Dante Cross's Coral Casino for everything it is worth. The N.B.P.D. will be watching.</p>
+  <div>
+    <button id="btn-new">NEW GAME</button>
+    <button id="btn-continue" class="secondary">CONTINUE</button>
+  </div>
+  <div class="controls">
+    <b>WASD</b> move / drive &nbsp;·&nbsp; <b>E</b> enter or exit a car &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>Click / G</b> shoot<br>
+    <b>Space</b> jump &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>H</b> horn &nbsp;·&nbsp; <b>Esc</b> pause &nbsp;·&nbsp; <b>Mouse drag</b> look around
+  </div>
+  <p style="font-size:12px;color:#6f6a8a">Runs fully offline in your browser. Progress saves to this browser only.</p>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <h2>PAUSED</h2>
+  <p>The city waits. Your save is safe.</p>
+  <div>
+    <button id="btn-resume">RESUME</button>
+    <button id="btn-quit" class="secondary">SAVE &amp; QUIT TO MENU</button>
+  </div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <h2 id="end-title">BUSTED</h2>
+  <p id="end-text"></p>
+  <div><button id="btn-end">Back on the street</button></div>
+</div>
+
 <p id="status" role="status" aria-live="polite"></p>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
