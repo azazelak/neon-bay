@@ -9,24 +9,45 @@ import { Car } from './vehicles.js';
 import { makeRng } from './rng.js';
 
 const PED_COLORS = [0xd23b3b, 0x2b6fd6, 0xe8b93a, 0x37c978, 0xe8e8e8, 0x8a4fd0, 0xff7a1a, 0x0e7d7b];
+const PED_SKINS = [0xc98d64, 0x8a5a3b, 0xe8b58a, 0x6e4530];
+const PED_HAIR = [0x14100c, 0x3a2a1a, 0x6e6e6e, 0xd8b13a, 0x8a2a2a];
 
-function makePedMesh(color) {
+function makePedMesh(color, rng) {
   const group = new THREE.Group();
   const jacket = new THREE.MeshLambertMaterial({ color });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xc98d64 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x22222e });
+  const skin = new THREE.MeshLambertMaterial({ color: rng.pick(PED_SKINS) });
+  const pants = new THREE.MeshLambertMaterial({ color: rng.pick([0x22222e, 0x3a3a4a, 0x5a4a3a, 0x2a4a3a]) });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.36), jacket);
   torso.position.y = 1.1;
   group.add(torso);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skin);
   head.position.y = 1.72;
   group.add(head);
+  if (rng.chance(0.5)) {
+    // Hair cap.
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshLambertMaterial({ color: rng.pick(PED_HAIR) }),
+    );
+    hair.position.y = 1.76;
+    group.add(hair);
+  } else {
+    // Ball cap.
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.26, 0.26, 0.1, 10),
+      new THREE.MeshLambertMaterial({ color: rng.pick(PED_COLORS) }),
+    );
+    cap.position.y = 1.9;
+    group.add(cap);
+  }
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.26), pants);
   legL.position.set(-0.16, 0.35, 0);
   group.add(legL);
   const legR = legL.clone();
   legR.position.x = 0.16;
   group.add(legR);
+  const s = rng.range(0.92, 1.08);
+  group.scale.setScalar(s);
   group.userData = { legL, legR };
   return group;
 }
@@ -63,7 +84,7 @@ export class TrafficManager {
   }
 
   _spawnTraffic() {
-    const kinds = ['sedan', 'sedan', 'taxi', 'van', 'truck', 'sedan', 'sports'];
+    const kinds = ['sedan', 'sedan', 'taxi', 'van', 'truck', 'sedan', 'sports', 'muscle', 'pickup', 'sedan'];
     for (let i = 0; i < CFG.trafficCount; i++) {
       const p = this._randomRoadPoint();
       const dir = this.rng.chance(0.5) ? 1 : -1;
@@ -80,7 +101,7 @@ export class TrafficManager {
   _spawnParked() {
     for (let i = 0; i < 7; i++) {
       const p = this._randomRoadPoint();
-      const kind = this.rng.pick(['sedan', 'sports', 'taxi', 'van']);
+      const kind = this.rng.pick(['sedan', 'sports', 'taxi', 'van', 'muscle', 'pickup']);
       const color = this.rng.pick(PALETTE.carColors);
       const side = this.rng.chance(0.5) ? 1 : -1;
       const x = p.axis === 'z' ? p.x + side * 4.4 : p.x;
@@ -95,7 +116,7 @@ export class TrafficManager {
   _spawnPeds() {
     for (let i = 0; i < CFG.pedCount; i++) {
       const p = this._randomRoadPoint();
-      const mesh = makePedMesh(this.rng.pick(PED_COLORS));
+      const mesh = makePedMesh(this.rng.pick(PED_COLORS), this.rng);
       const side = this.rng.chance(0.5) ? 1 : -1;
       const x = p.axis === 'z' ? p.x + side * 8.5 : p.x + this.rng.range(-8, 8);
       const z = p.axis === 'x' ? p.z + side * 8.5 : p.z + this.rng.range(-8, 8);

@@ -11,6 +11,7 @@ export class HUD {
       healthText: document.getElementById('hud-health-text'),
       cash: document.getElementById('hud-cash'),
       rep: document.getElementById('hud-rep'),
+      tokens: document.getElementById('hud-tokens'),
       stars: document.getElementById('hud-stars'),
       objective: document.getElementById('hud-objective'),
       clock: document.getElementById('hud-clock'),
@@ -47,6 +48,7 @@ export class HUD {
     this.el.health.style.background = hp > 50 ? '#37c978' : hp > 25 ? '#e8b93a' : '#d23b3b';
     this.el.cash.textContent = `$${state.cash.toLocaleString('en-US')}`;
     this.el.rep.textContent = `REP ${state.rep}`;
+    this.el.tokens.textContent = `◆ ${state.tokens} / ${state.tokenTotal} TOKENS`;
     this.el.stars.textContent = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
     this.el.stars.style.color = state.wanted > 0 ? '#ff2d55' : '#ffffff';
     this.el.objective.textContent = state.objective;

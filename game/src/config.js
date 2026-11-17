@@ -30,10 +30,19 @@ export const CFG = {
   carReverseMax: 10,
   carTurn: 1.9,
   carRadius: 1.6,
-  trafficCount: 14,
+  trafficCount: 20,
   trafficSpeed: 9,
-  pedCount: 26,
+  pedCount: 36,
   pedSpeed: 1.6,
+  // Neon tokens: collectibles that pay cash (side activity).
+  tokenCount: 12,
+  tokenReward: 50,
+  // Police pursuit: cruisers must be able to catch a fleeing player.
+  // Speed cap per wanted level: 26 + 3.6 * level (L1 29.6 … L5 44).
+  policeBaseSpeed: 26,
+  policeSpeedPerStar: 3.6,
+  policeTopSpeed: 44,
+  roadblockMinStars: 3,
   // Wanted system.
   heatPerStar: 20,
   maxWanted: 5,

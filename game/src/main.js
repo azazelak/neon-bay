@@ -15,6 +15,7 @@ import { TrafficManager } from './traffic.js';
 import { WantedSystem, PoliceManager } from './police.js';
 import { Combat } from './combat.js';
 import { MissionManager } from './missions.js';
+import { TokenManager } from './tokens.js';
 import { HUD } from './hud.js';
 import { saveGame, loadGame, hasSave } from './save.js';
 import { Effects } from './effects.js';
@@ -47,6 +48,7 @@ class Game {
     this.police = new PoliceManager(this.scene, this.city);
     this.player = new Player(this.scene, 0, 156); // mid-avenue, facing downtown
     this.combat = new Combat(this.sound, this.effects, this.wanted, this.traffic, this.police);
+    this.tokens = new TokenManager(this.scene, this.city);
     this.hud = new HUD();
     this.extraCars = [];
     this.missions = new MissionManager(this.scene, {
@@ -250,14 +252,22 @@ class Game {
     }
 
     this.traffic.update(dt, this.player, this.wanted.level, this.time);
+    const holdPos = this.missions.state === 'active' && this.missions.stage?.type === 'hold'
+      ? this.missions.stage.pos
+      : null;
     const policeNear = this.police.update(dt, this.player, this.wanted, this.time,
       () => this._busted(),
       (dmg) => {
         if (this.player.damage(dmg)) this.hud.damageFlash();
-      });
+      },
+      holdPos);
     this.wanted.update(dt, policeNear);
     this.combat.update(dt, this.input, this.player, camF, this.camera.position);
     this.missions.update(dt, this.player, this);
+    this.tokens.update(dt, this.time, this.player, (reward) => {
+      this.cash += reward;
+      this.sound.pickup();
+    });
     this.effects.update(dt);
 
     // Car-car separation (traffic, police, player's ride, parked cars).
@@ -294,6 +304,8 @@ class Game {
       ammo: this.combat.ammo,
       hasGun: this.combat.hasGun,
       rep: this.rep,
+      tokens: this.tokens.collected,
+      tokenTotal: this.tokens.total,
       time: this.time,
       city: this.city,
       marker: this.missions.markerPos,
@@ -365,6 +377,7 @@ window.__neonBay = {
   player: game.player,
   input: game.input,
   missions: game.missions,
+  tokens: game.tokens,
   traffic: game.traffic,
   police: game.police,
   wantedSystem: game.wanted,

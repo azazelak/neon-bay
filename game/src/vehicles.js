@@ -26,6 +26,8 @@ export function makeCarMesh(kind, color) {
     sedan: { l: 4.4, w: 1.9, h: 0.75, cabL: 2.2, cabH: 0.65 },
     taxi: { l: 4.4, w: 1.9, h: 0.75, cabL: 2.2, cabH: 0.65 },
     sports: { l: 4.6, w: 2.0, h: 0.6, cabL: 1.9, cabH: 0.55 },
+    muscle: { l: 4.8, w: 2.05, h: 0.8, cabL: 2.0, cabH: 0.6 },
+    pickup: { l: 5.2, w: 2.0, h: 0.9, cabL: 1.5, cabH: 0.85 },
     truck: { l: 5.6, w: 2.1, h: 1.1, cabL: 1.6, cabH: 0.9 },
     van: { l: 5.0, w: 2.0, h: 1.3, cabL: 3.4, cabH: 0.7 },
     police: { l: 4.5, w: 1.95, h: 0.78, cabL: 2.2, cabH: 0.68 },
@@ -35,8 +37,29 @@ export function makeCarMesh(kind, color) {
   body.position.y = 0.55;
   group.add(body);
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(dims.w * 0.86, dims.cabH, dims.cabL), glassMat);
-  cabin.position.set(0, 0.55 + dims.h / 2 + dims.cabH / 2 - 0.08, kind === 'truck' ? dims.l / 2 - 1.1 : -0.2);
+  cabin.position.set(0, 0.55 + dims.h / 2 + dims.cabH / 2 - 0.08, kind === 'truck' ? dims.l / 2 - 1.1 : kind === 'pickup' ? dims.l / 2 - 1.0 : -0.2);
   group.add(cabin);
+  if (kind === 'muscle') {
+    // Hood scoop + twin racing stripes.
+    const scoop = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 1.0), bodyMat(0x14141a));
+    scoop.position.set(0, 0.55 + dims.h / 2 + 0.1, dims.l / 2 - 0.9);
+    group.add(scoop);
+    for (const sx of [-0.35, 0.35]) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, dims.l * 0.98), bodyMat(0x14141a));
+      stripe.position.set(sx, 0.55 + dims.h / 2 + 0.02, 0);
+      group.add(stripe);
+    }
+  }
+  if (kind === 'pickup') {
+    // Open bed with a spare tire.
+    const bedWall = new THREE.Mesh(new THREE.BoxGeometry(dims.w * 0.9, 0.35, 0.12), bodyMat(color));
+    bedWall.position.set(0, 0.55 + dims.h / 2 + 0.15, -dims.l / 2 + 0.3);
+    group.add(bedWall);
+    const spare = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.25, 12), tireMat);
+    spare.rotation.x = Math.PI / 2;
+    spare.position.set(0, 0.55 + dims.h / 2 + 0.2, -dims.l / 2 + 1.1);
+    group.add(spare);
+  }
   if (kind === 'taxi') {
     const sign = new THREE.Mesh(
       new THREE.BoxGeometry(0.7, 0.28, 0.4),
@@ -96,7 +119,7 @@ export class Car {
     this.heading = heading;
     this.speed = 0;
     this.steer = 0;
-    this.maxSpeed = kind === 'sports' ? 42 : kind === 'police' ? 38 : kind === 'truck' || kind === 'van' ? 26 : CFG.carMaxSpeed;
+    this.maxSpeed = kind === 'sports' ? 42 : kind === 'muscle' ? 38 : kind === 'police' ? CFG.policeTopSpeed : kind === 'truck' || kind === 'van' ? 26 : CFG.carMaxSpeed;
     this.isPlayer = false;
     this.isPolice = kind === 'police';
     this.stolen = false;
