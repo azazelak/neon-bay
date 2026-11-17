@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>Neon Bay — an open-world crime game</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #14101f; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eef1f5; }
@@ -17,10 +18,11 @@
   #hud-health-fill { height: 100%; width: 100%; background: #37c978; transition: width .2s; }
   #hud-health-text { font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px #000; }
   #hud-objective { max-width: 380px; font-size: 14px; font-weight: 600; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,.45); padding: 6px 10px; border-left: 3px solid #ffe600; border-radius: 2px; }
-  #hud-stars { font-size: 26px; letter-spacing: 4px; text-shadow: 0 2px 4px #000; }
+  #hud-stars { font-size: 30px; letter-spacing: 4px; text-shadow: 0 2px 4px #000; }
   #hud-right { text-align: right; text-shadow: 0 1px 3px #000; }
   #hud-cash { font-size: 26px; font-weight: 800; color: #7cff00; }
   #hud-rep { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+  #hud-tokens { font-size: 13px; font-weight: 700; letter-spacing: 1px; color: #ffe600; }
   #hud-clock { font-size: 15px; font-weight: 600; }
   #hud-ammo { position: absolute; left: 18px; bottom: 16px; font-size: 14px; font-weight: 700; text-shadow: 0 1px 3px #000; }
   #hud-hint { position: absolute; left: 18px; bottom: 40px; font-size: 12px; opacity: .85; text-shadow: 0 1px 3px #000; transition: opacity 1s; }
@@ -62,6 +64,7 @@
     <div id="hud-right">
       <div id="hud-cash">$0</div>
       <div id="hud-rep">REP 0</div>
+      <div id="hud-tokens">◆ 0 / 12 TOKENS</div>
       <div id="hud-clock">18:20</div>
     </div>
   </div>
