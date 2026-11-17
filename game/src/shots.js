@@ -1,79 +1,129 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Neon Bay — the screenshot scenes behind ?shot=chase|street|mission|
+// skyline. Each one sets the real game state (player, cars, wanted level,
+// mission) from a fixed seed, then plays the real rules forward for a fixed
+// number of steps, so the frame is what a short game really looks like and
+// the same seed always gives the same frame. Every shot shows the HUD.
+import * as THREE from 'three';
+import { Car } from './vehicles.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+const STEP = 1 / 60;
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+function placePoliceCar(game, x, z, heading) {
+  const car = new Car('police', 0xf2f2f2, x, z, heading);
+  game.scene.add(car.mesh);
+  game.police.cars.push(car);
+  return car;
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+function placePlayerCar(game, kind, color, x, z, heading, speed) {
+  const car = new Car(kind, color, x, z, heading);
+  car.speed = speed;
+  game.scene.add(car.mesh);
+  game.extraCars.push(car);
+  game.player.enterCar(car);
+  car.syncMesh();
+  return car;
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+function warmUp(game, seconds, holdW) {
+  if (holdW) game.input.testDown('KeyW');
+  for (let i = 0; i < Math.round(seconds / STEP); i++) game.step(STEP);
+  if (holdW) game.input.testUp('KeyW');
+  game.input.endFrame();
+}
+
+function hideBanner(game) {
+  game.hud._bannerT = 0;
+  game.hud.el.banner.classList.remove('show');
+}
+
+export function setupShot(game, name) {
+  game.state = 'playing';
+  game.timeMin = 18 * 60 + 24; // 18:24, sun low, neon on
+  const P = game.player;
+  const W = game.wanted;
+  const cam = game.rig;
+  const target = (x, y, z) => new THREE.Vector3(x, y, z);
+
+  if (name === 'chase') {
+    // Rico in a sports car down Ocean Drive, three stars, two cruisers
+    // closing in behind. The cover shot.
+    game.missions.startNext(); // First Wheels: already in a car, so the
+    // objective reads "Drive the car to Mara's garage".
+    placePlayerCar(game, 'sports', 0xff7a1a, 0, -52, 0, 24);
+    W.heat = 60;
+    W._recalc();
+    // One cruiser ahead, coming at the player head-on (visible in frame),
+    // one behind in pursuit. The ahead cruiser starts far enough south that
+    // it is still ahead, lights flashing, when the frame is taken.
+    placePoliceCar(game, 6, 85, Math.PI);
+    placePoliceCar(game, -4, -80, 0);
+    cam.snapTo(target(0, 1, -52), Math.PI, 0.3, 12, 4.6);
+    warmUp(game, 2.2, true);
+    cam.snapTo(target(P.x, 1, P.z), Math.PI, 0.3, 12, 4.6);
+    hideBanner(game);
+    return;
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+
+  if (name === 'mission') {
+    // Bay Run, stage two: package in hand, two stars, racing the
+    // checkpoint on Ocean Drive with the beacon ahead.
+    game.missions.missionsDone = 1;
+    game.missions.startNext();
+    game.combat.giveGun();
+    P.x = 0;
+    P.z = -156;
+    P.syncMesh();
+    warmUp(game, 0.4, false); // walks into the pickup, stage advances, heat hits 2
+    placePlayerCar(game, 'sedan', 0x2b6fd6, -190, 0, Math.PI / 2, 20);
+    placePoliceCar(game, -212, 0, Math.PI / 2);
+    cam.snapTo(target(P.x, 1, P.z), Math.PI / 2 + Math.PI, 0.26, 11, 4.2);
+    warmUp(game, 0.7, true); // short: the car closes on the checkpoint, beacon still ahead
+    cam.snapTo(target(P.x, 1, P.z), Math.PI / 2 + Math.PI, 0.26, 11, 4.2);
+    hideBanner(game);
+    return;
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+
+  if (name === 'skyline') {
+    // Golden hour on the coastal road: the car, the beach, downtown and
+    // the sun sinking into the bay behind it all.
+    game.missions.startNext();
+    placePlayerCar(game, 'sports', 0xe8b93a, 156, 220, -Math.PI / 2, 18);
+    W.heat = 20;
+    W._recalc();
+    placePoliceCar(game, 190, 220, -Math.PI / 2);
+    cam.snapTo(target(156, 1, 220), Math.PI / 2, 0.34, 13, 5);
+    warmUp(game, 1.6, true);
+    cam.snapTo(target(P.x, 1, P.z), Math.PI / 2, 0.34, 13, 5);
+    hideBanner(game);
+    return;
+  }
+
+  // 'street' (and any unknown name): Rico on foot at the downtown
+  // crossing, traffic and pedestrians around him, clean record.
+  game.missions.startNext(); // objective: "Steal a car (walk up to one and press E)"
+  P.x = 2;
+  P.z = 8;
+  P.heading = 0;
+  P.syncMesh();
+  // Stage the street: a traffic car rolling through the crossing ahead and
+  // a pedestrian on the sidewalk, so the frame shows the living city.
+  const t0 = game.traffic.cars[0];
+  t0.car.x = 4;
+  t0.car.z = -44;
+  t0.car.heading = 0;
+  t0.car.speed = 8;
+  t0.axis = 'z';
+  t0.dir = 1;
+  t0.waypoint = { x: 4, z: 52 };
+  t0.car.syncMesh();
+  const p0 = game.traffic.peds[0];
+  p0.x = -5;
+  p0.z = -14;
+  p0.target = { x: -5, z: 30 };
+  p0.state = 'walk';
+  cam.snapTo(target(2, 1, 8), 0, 0.28, 9.5, 4.4);
+  warmUp(game, 1.5, false);
+  cam.snapTo(target(P.x, 1, P.z), 0, 0.28, 9.5, 4.4);
+  hideBanner(game);
 }

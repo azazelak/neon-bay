@@ -1,53 +1,88 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Neon Bay — keyboard and mouse input. WASD moves, mouse drag orbits the
+// camera, E enters/exits cars, F punches, click (or G) shoots, Space jumps,
+// Shift sprints, H honks, Esc pauses. Also exposes a test hook so the
+// headless playthrough can press keys without a real keyboard.
+export class Input {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.dragDX = 0;
+    this.dragDY = 0;
+    this.mouseDown = false;
+    this.clicked = false; // one-shot: a click this frame
+    this._dragging = false;
+    this._lastX = 0;
+    this._lastY = 0;
+    this._pressed = new Set(); // keys pressed since last poll
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      this._pressed.add(e.code);
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+    canvas.addEventListener('mousedown', (e) => {
+      this._dragging = true;
+      this.mouseDown = true;
+      this.clicked = true;
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
+    });
+    window.addEventListener('mouseup', () => {
+      this._dragging = false;
+      this.mouseDown = false;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!this._dragging) return;
+      this.dragDX += e.clientX - this._lastX;
+      this.dragDY += e.clientY - this._lastY;
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
+    });
+  }
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  down(code) {
+    return this.keys.has(code);
+  }
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  // True once per physical press; callers should consume it each frame.
+  pressed(code) {
+    return this._pressed.has(code);
+  }
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+  // Movement axes in camera space: x = strafe right, y = forward.
+  moveAxes() {
+    let x = 0;
+    let y = 0;
+    if (this.down('KeyW') || this.down('ArrowUp')) y += 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) y -= 1;
+    if (this.down('KeyD') || this.down('ArrowRight')) x += 1;
+    if (this.down('KeyA') || this.down('ArrowLeft')) x -= 1;
+    return { x, y };
+  }
+
+  get sprint() {
+    return this.down('ShiftLeft') || this.down('ShiftRight');
+  }
+
+  // Test hook: pretend a key is held or pressed (used by headless tests).
+  testDown(code) {
+    this.keys.add(code);
+  }
+  testUp(code) {
+    this.keys.delete(code);
+  }
+  testPress(code) {
+    this.keys.add(code);
+    this._pressed.add(code);
+  }
+
+  endFrame() {
+    this.dragDX = 0;
+    this.dragDY = 0;
+    this.clicked = false;
+    this._pressed.clear();
+  }
 }
