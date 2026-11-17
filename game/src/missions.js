@@ -55,12 +55,12 @@ const MISSIONS = [
     briefing: 'Dante Cross owns this city and he knows it. Tonight we take his casino vault and sail out on the tide. Get in, grab the cash, and do not stop driving until you see the boat.',
     stages: [
       { text: 'Reach the Coral Casino', type: 'goto', pos: { x: 0, z: 52 }, radius: 7 },
-      { text: 'Hold the vault — stay inside the marker', type: 'hold', pos: { x: 0, z: 52 }, radius: 7, holdTime: 8 },
+      { text: 'Hold the vault — stay inside the marker', type: 'hold', pos: { x: 0, z: 52 }, radius: 9, holdTime: 8 },
       { text: 'Escape to the marina boat — the whole city is coming', type: 'goto', pos: { x: 0, z: 248 }, radius: 8 },
     ],
     reward: 8000,
     timeLimit: 300,
-    wantedOnStage: { 2: 4 },
+    wantedOnStage: { 1: 3, 2: 4 }, // cops close in for the hold, then the whole city comes for the escape
   },
 ];
 
@@ -144,7 +144,9 @@ export class MissionManager {
 
   complete() {
     const m = this.current;
-    this.state = 'done';
+    this.state = 'idle'; // back to idle: the next job's marker appears and
+    // standing on it starts it (a 'done' state would strand the player
+    // with no way to start the next mission).
     this.missionsDone++;
     this.completed.add(m.id);
     this.beacon.visible = false;

@@ -50,6 +50,8 @@ export class PoliceManager {
     this.cops = []; // { mesh, x, z, heading, bustT, shootT, health }
     this._copMeshes = [];
     this._spawnT = 0;
+    this._roadblock = null; // { cars, until } — two cruisers parked across the road
+    this._roadblockT = 0;
   }
 
   _spawnCarNear(player) {
@@ -79,7 +81,10 @@ export class PoliceManager {
 
   // Keep the force matched to the wanted level. Returns true when any
   // police is close enough to see the player (blocks heat decay).
-  update(dt, player, wanted, time, onBusted, onCopShot) {
+  // holdPos: when the player is holding a vault, the cruisers ring the
+  // spot at ~10 m and wait (a standoff) instead of ramming the player
+  // out of the circle — the hold has to be winnable.
+  update(dt, player, wanted, time, onBusted, onCopShot, holdPos = null) {
     const level = wanted.level;
     const wantCars = level;
     const wantCops = player.inCar ? 0 : Math.min(level, 2);
@@ -99,7 +104,19 @@ export class PoliceManager {
       for (const cop of this.cops) this.scene.remove(cop.mesh);
       this.cars = [];
       this.cops = [];
+      this._roadblock = null;
       return false;
+    }
+
+    // Roadblock at 3+ stars: two cruisers park across the road ahead of
+    // the fleeing player, so a straight-line escape has to go around them.
+    this._roadblockT -= dt;
+    if (level >= CFG.roadblockMinStars && player.inCar && !this._roadblock && this._roadblockT <= 0) {
+      this._spawnRoadblock(player, time);
+      this._roadblockT = 22;
+    }
+    if (this._roadblock && (level < CFG.roadblockMinStars || time - this._roadblock.since > 25)) {
+      this._clearRoadblock();
     }
 
     let near = false;
@@ -109,22 +126,43 @@ export class PoliceManager {
     for (const car of this.cars) {
       const d = Math.hypot(player.x - car.x, player.z - car.z);
       if (d < 70) near = true;
-      const maxSpeed = Math.min(car.maxSpeed, 20 + level * 3.5);
-      if (d < 18) {
+      // Cruisers are fast enough to catch a fleeing player now: their cap
+      // rises with the wanted level (L1 29.6 … L5 44).
+      const maxSpeed = Math.min(car.maxSpeed, CFG.policeBaseSpeed + level * CFG.policeSpeedPerStar);
+      if (car._roadblock) {
+        // Parked across the road: hold position, lights flashing.
+        car.flashLightBar(time);
+      } else if (holdPos) {
+        // Standoff: ring the vault, don't shove the player out of it.
+        const hx = holdPos.x - car.x;
+        const hz = holdPos.z - car.z;
+        const hd = Math.hypot(hx, hz);
+        if (hd > 11) {
+          car.autopilot(dt, Math.atan2(hx, hz), maxSpeed, this.city);
+        } else {
+          car.autopilot(dt, car.heading, 0, this.city);
+        }
+      } else if (d < 18) {
         car.autopilot(dt, Math.atan2(player.x - car.x, player.z - car.z), maxSpeed, this.city);
       } else {
         car._wp = this._nextGridPoint(car, player);
         const wp = car._wp;
         car.autopilot(dt, Math.atan2(wp.x - car.x, wp.z - car.z), maxSpeed, this.city);
       }
-      car.flashLightBar(time);
+      if (!car._roadblock) car.flashLightBar(time);
       // Ram: shove the player's car and hurt the player a little.
       if (player.inCar) {
         const pc = player.currentCar;
         const cd = Math.hypot(pc.x - car.x, pc.z - car.z);
         if (cd < car.radius + pc.radius + 0.4) {
-          pc.speed *= 0.94;
+          // PIT at 3+ stars: a faster cruiser alongside shoves the
+          // player's rear sideways and scrubs speed hard.
+          pc.speed *= level >= 3 ? 0.88 : 0.94;
           car.speed *= 0.9;
+          if (level >= 3 && car.speed > Math.abs(pc.speed)) {
+            pc.x += Math.cos(car.heading) * 1.1;
+            pc.z += -Math.sin(car.heading) * 1.1;
+          }
         }
       } else if (d < 2.2) {
         // A police car next to a fleeing player on foot: the cop gets out.
@@ -167,7 +205,38 @@ export class PoliceManager {
     return near;
   }
 
-  // Next waypoint for a police car: stay on the road grid. The car drives
+  // Two cruisers parked across the road ahead of a fleeing player.
+  _spawnRoadblock(player, time) {
+    const pc = player.currentCar;
+    const fx = Math.sin(pc.heading);
+    const fz = Math.cos(pc.heading);
+    const ax = pc.x + fx * 45;
+    const az = pc.z + fz * 45;
+    const lines = this.city.roadLines;
+    const nearest = (v) => lines.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+    const onNS = Math.abs(ax - nearest(ax)) < Math.abs(az - nearest(az));
+    const bx = onNS ? nearest(ax) : ax;
+    const bz = onNS ? az : nearest(az);
+    const across = onNS ? { x: 1, z: 0 } : { x: 0, z: 1 };
+    const cars = [];
+    for (const side of [-3.2, 3.2]) {
+      const car = new Car('police', 0xf2f2f2, bx + across.x * side, bz + across.z * side, onNS ? Math.PI / 2 : 0);
+      car._roadblock = true;
+      this.scene.add(car.mesh);
+      this.cars.push(car);
+      cars.push(car);
+    }
+    this._roadblock = { cars, since: time };
+  }
+
+  _clearRoadblock() {
+    if (!this._roadblock) return;
+    for (const car of this._roadblock.cars) {
+      this.scene.remove(car.mesh);
+      this.cars = this.cars.filter((c) => c !== car);
+    }
+    this._roadblock = null;
+  }
   // along the road it is nearest to, toward the next intersection; at an
   // intersection it picks the axis with the bigger gap to the player. If the
   // player is on the same road ahead, the waypoint is the player.
