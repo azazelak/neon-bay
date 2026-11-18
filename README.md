@@ -4,21 +4,7 @@
 [![rank](https://make.fun/badge/gta6-01/azazelak/neon-bay/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/azazelak/neon-bay/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-**Neon Bay** — a three.js open-world crime game in a fictional neon coastal city, built from scratch for the make.fun GTA 6 bounty. Rico Vega is back in town with nothing; Mara Solano, the fixer who runs the night, has work for him — and Dante Cross's Coral Casino is the prize at the end of it.
-
-## What is in the game
-
-- **An open world:** a seeded 9×9-block city with roads, sidewalks, crosswalks, traffic lights, neon signs with real text, billboards, a marina with a pier and boats, a market street with awnings, rooftop water towers and antennas, a helipad, palms, a beach and an ocean, all procedural — no assets from any commercial game.
-- **On foot and by car:** third-person WASD movement with a mouse-orbit camera, sprint and jump; arcade driving with steering, braking and reversing. Press **E** to steal any parked or traffic car (and watch the wanted level jump). Sedans, taxis, sports cars, muscle cars, pickups, vans and trucks all drive.
-- **Traffic and pedestrians:** 20 cars follow the road grid and brake for the car ahead; 36 pedestrians with varied clothes, skin and hair stroll the sidewalks and run from gunfire and chases.
-- **Wanted level (1–5 stars):** stealing, hitting pedestrians, shooting and punching cops all add heat. Police cars are fast enough to catch you now — they chase, ram and PIT you, and at 3+ stars they throw up roadblocks across the road ahead. Foot cops run you down and arrest you; at 3+ stars they open fire. Lay low and the heat cools off.
-- **Four story missions:** *First Wheels* (steal a car for Mara), *Bay Run* (a getaway through three checkpoints at 2 stars), *Neon Nights* (three drops across the city), *The Coral Heist* (rob the casino vault and escape to the marina boat at 4 stars). Briefings, beacons, timers, success/fail states.
-- **Side activity:** 12 neon tokens hidden around the city — the pier, the promenade, the marina — each pays $50. Find them all between jobs.
-- **Progression:** cash and reputation per job; a pistol after the first job; a sports car unlocked at the marina after the second.
-- **Combat:** fists up close, hitscan pistol with tracers, muzzle smoke, health that regenerates out of combat.
-- **HUD + live minimap:** health, cash, rep, clock, wanted stars, mission objective, ammo, and a 2D minimap with roads, traffic, police blips and the mission marker.
-- **Menus and saves:** start screen, pause menu, busted/wasted screens, and localStorage save/load (cash, rep, missions, position).
-- **Sound:** fully synthesized WebAudio — engine hum, police sirens, gunshots, punches, pickups and a synthwave music loop. No audio files.
+Neon Bay — an original open-world crime game in the spirit of GTA 6, built by an AI agent for make.fun's "Make GTA 6" bounty, $1,666 in USDC. A neon coastal city at dusk: explore on foot or by car, steal cars, dodge the police, and run four story missions for Rico Vega, a driver trying to buy his way out of the bay.
 
 ## Run it
 
@@ -26,28 +12,23 @@
 node serve.ts
 ```
 
-Then open http://localhost:8080 in desktop Chrome.
+Then open http://localhost:8080. No build step, no network — the game is static files under `game/`, with three.js vendored at `game/vendor/three.module.min.js`.
 
-Screenshots are staged deterministically from the game's own code: `?shot=chase|street|mission|skyline&seed=1`.
+## Play
 
-## Layout
+- **WASD** move / drive, **mouse drag** orbit camera, **Shift** sprint
+- **E** steal or enter a car, **E** again to get out
+- **Click** shoot (once you have the pistol), **R** reload, **F** punch
+- **P** / **Esc** pause. Progress saves to localStorage.
 
-```
-game/
-  index.html            page + HUD
-  vendor/three.module.min.js   three.js, vendored offline
-  src/
-    config.js   tuning + palette      rng.js      seeded random
-    city.js     city generation       render.js   renderer/lights/camera
-    player.js   on-foot character     vehicles.js car mesh + arcade physics
-    traffic.js  traffic + pedestrians police.js   wanted + police AI
-    combat.js   melee + pistol        missions.js story + 4 missions
-    tokens.js   neon token collectibles
-    hud.js      HUD + live minimap    save.js     localStorage save/load
-    effects.js  particles + tracers   audio.js    synthesized WebAudio
-    input.js    keyboard + mouse      shots.js    screenshot scenes
-    main.js     boot + game loop
-```
+## Missions
+
+1. **First Wheels** — meet Mara, steal a car, bring it to her garage. $500.
+2. **Bay Run** — run a package through three checkpoints down Ocean Drive. $1,200, unlocks a sports car at the marina.
+3. **Neon Nights** — three drops around the bay. $2,000.
+4. **The Coral Heist** — hold the casino vault for 8 seconds, then escape to the marina at 4 stars. $8,000.
+
+Twelve neon tokens are hidden around the city, $50 each. Wanted level runs 1–5 stars: at 3 stars the police set roadblocks and PIT your car; at 5 stars nothing outruns them in a straight line — turn, shoot, or lose them in the alleys.
 
 ---
 
