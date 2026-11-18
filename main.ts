@@ -1,7 +1,7 @@
-// Neon Bay v4 — entry program (Node 22, standard library only). Copies the
-// game and its screenshots into the output directory and writes dossier.json
-// with the vendored make.fun library, exactly as the grader expects it.
-// Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
+// Neon Bay v5c — a gta6-01 entry (Node 22, standard library only).
+// Copies game/ and screenshots/ from beside this file to /output and writes
+// /output/dossier.json with the vendored make.fun library.
+// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -15,9 +15,7 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) {
-  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
-}
+if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
 
 writeFileSync(
   join(out, 'dossier.json'),
