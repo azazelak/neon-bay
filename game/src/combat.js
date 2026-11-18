@@ -1,63 +1,75 @@
-// Neon Bay v4 — combat: fists and a hitscan pistol. The pistol holds 12
-// rounds, reloads in 1.2 s, and takes 3 hits to disable a cruiser. Punching
-// works up close on foot. Both return an event the effects and audio modules
-// can play from.
-import { clamp } from './config.js';
-
-export function createCombat() {
-  let hasGun = false;
-  let ammo = 0;
-  let reloading = 0;
-  let punchCool = 0;
-
-  function update(dt) {
-    if (reloading > 0) {
-      reloading -= dt;
-      if (reloading <= 0) ammo = 12;
-    }
-    punchCool -= dt;
+// Neon Bay v5c — combat: punch, pistol, reload, cop return fire hooks.
+export class Combat {
+  constructor(game) {
+    this.game = game;
+    this.lastShotAt = 0;
+    this.punchAt = 0;
   }
 
-  function shoot(aim, police) {
-    if (!hasGun || reloading > 0 || ammo <= 0) return { fired: false };
-    ammo--;
-    if (ammo === 0) reloading = 1.2;
-    // Nearest cruiser inside the aim cone.
+  shoot() {
+    const p = this.game.player;
+    const now = this.game.time;
+    if (now - this.lastShotAt < 0.25) return;
+    if (p.weapon === 'pistol') {
+      if (p.ammo <= 0) { this.game.audio?.blip(180, 0.06); return; }
+      p.ammo -= 1;
+    }
+    this.lastShotAt = now;
+    this.game.audio?.shot();
+    const from = p.inCar && p.car ? p.car.pos : p.pos;
+    const yaw = p.yaw;
+    const dx = Math.sin(yaw), dz = Math.cos(yaw);
+    // hit the nearest cop or ped roughly in the line of fire
+    const targets = [...this.game.police.cruisers, ...this.game.traffic.cars];
     let best = null, bestD = 60;
-    for (const c of police.cruisers) {
-      if (c.dead) continue;
-      const dx = c.x - aim.x, dz = c.z - aim.z;
-      const d = Math.hypot(dx, dz);
-      if (d > 60 || d > bestD) continue;
-      const dot = (dx * aim.dx + dz * aim.dz) / (d || 1);
-      if (dot > 0.985) { best = c; bestD = d; }
+    for (const t of targets) {
+      const rx = t.pos.x - from.x, rz = t.pos.z - from.z;
+      const along = rx * dx + rz * dz;
+      if (along < 2 || along > 60) continue;
+      const side = Math.abs(rx * dz - rz * dx);
+      if (side < 3 && along < bestD) { bestD = along; best = t; }
     }
     if (best) {
-      police.damageCruiser(best, 1);
-      return { fired: true, hit: true, x: best.x, z: best.z, dist: bestD };
-    }
-    return { fired: true, hit: false, x: aim.x + aim.dx * 55, z: aim.z + aim.dz * 55, dist: 55 };
-  }
-
-  function punch(player, police) {
-    if (punchCool > 0) return { hit: false };
-    punchCool = 0.45;
-    for (const c of police.cruisers) {
-      if (c.dead) continue;
-      const d = Math.hypot(c.x - player.x, c.z - player.z);
-      if (d < 3) {
-        police.damageCruiser(c, 1);
-        return { hit: true, x: c.x, z: c.z };
+      this.game.effects?.spark(best.pos.x, best.pos.z);
+      if (best.police) {
+        best.hp -= p.weapon === 'pistol' ? 34 : 12;
+        if (best.hp <= 0) {
+          best.disabled = true;
+          this.game.police.addHeat(6);
+        }
+      } else {
+        best.hp -= 20;
+        if (best.hp <= 0) best.disabled = true;
       }
     }
-    return { hit: false };
+    this.game.effects?.muzzle(from);
   }
 
-  return {
-    get hasGun() { return hasGun; },
-    get ammo() { return ammo; },
-    get reloading() { return reloading > 0; },
-    giveGun() { hasGun = true; ammo = 12; },
-    update, shoot, punch,
-  };
+  punch() {
+    const p = this.game.player;
+    const now = this.game.time;
+    if (now - this.punchAt < 0.45 || p.inCar) return;
+    this.punchAt = now;
+    this.game.audio?.blip(120, 0.08);
+    const dx = Math.sin(p.yaw), dz = Math.cos(p.yaw);
+    for (const ped of this.game.traffic.peds) {
+      const rx = ped.x - p.pos.x, rz = ped.z - p.pos.z;
+      if (rx * dx + rz * dz > 0 && Math.hypot(rx, rz) < 2.2) {
+        ped.x += dx * 3; ped.z += dz * 3;
+        ped.mesh.position.set(ped.x, 0, ped.z);
+        this.game.police.addHeat(4);
+        break;
+      }
+    }
+  }
+
+  reload() {
+    const p = this.game.player;
+    if (p.weapon !== 'pistol' || p.reserve <= 0 || p.ammo >= 12) return;
+    const need = 12 - p.ammo;
+    const take = Math.min(need, p.reserve);
+    p.ammo += take;
+    p.reserve -= take;
+    this.game.audio?.blip(520, 0.05);
+  }
 }

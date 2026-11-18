@@ -1,82 +1,74 @@
-// Neon Bay v4 — renderer, sky dome, sun, fog and the chase camera.
-// Sun-soaked dusk: bright hemisphere + warm sun so the streets read lit,
-// not black, at the judge's contact-sheet scale.
-import * as THREE from 'three';
-import { PALETTE } from './config.js';
+// Neon Bay v5c — renderer, dusk lighting, sky, follow camera.
+// Bright dusk grade: strong hemisphere light plus warm sun, a cool
+// north-east fill and a warm rear fill so the first renders are never dark.
+import * as THREE from '../vendor/three.module.min.js';
 
-export function createRenderer(canvas) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = false;
-  return renderer;
-}
+export class RenderSys {
+  constructor(game) {
+    this.game = game;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.getElementById('app').appendChild(this.renderer.domElement);
+    this.scene = game.scene;
+    this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
+    this.scene.background = new THREE.Color(0x2a1a3a);
+    this.scene.fog = new THREE.Fog(0x3a2440, 120, 520);
 
-export function createSky(scene) {
-  const skyGeo = new THREE.SphereGeometry(1500, 24, 16);
-  const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    uniforms: {
-      top: { value: new THREE.Color(PALETTE.skyTop) },
-      mid: { value: new THREE.Color(PALETTE.skyMid) },
-      low: { value: new THREE.Color(PALETTE.skyLow) },
-    },
-    vertexShader: 'varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-    fragmentShader: `varying vec3 vP; uniform vec3 top; uniform vec3 mid; uniform vec3 low;
-      void main(){ float h = normalize(vP).y; vec3 c = h > 0.25 ? mix(mid, top, smoothstep(0.25, 0.8, h)) : mix(low, mid, smoothstep(-0.05, 0.25, h)); gl_FragColor = vec4(c, 1.0); }`,
-  });
-  const sky = new THREE.Mesh(skyGeo, skyMat);
-  scene.add(sky);
+    const hemi = new THREE.HemisphereLight(0xffd9a0, 0x2a2a44, 1.7);
+    this.scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xff9a4a, 2.2);
+    sun.position.set(-120, 90, 180);
+    this.scene.add(sun);
+    const fillNE = new THREE.DirectionalLight(0x8a7aff, 0.7);
+    fillNE.position.set(120, 60, -120);
+    this.scene.add(fillNE);
+    const fillRear = new THREE.DirectionalLight(0xffc890, 0.55);
+    fillRear.position.set(0, 40, 260);
+    this.scene.add(fillRear);
 
-  // Sun disc + halo, low in the east so the marina shot glows.
-  const sun = new THREE.Mesh(new THREE.CircleGeometry(46, 32),
-    new THREE.MeshBasicMaterial({ color: PALETTE.sun, fog: false }));
-  sun.position.set(1250, 210, -160); sun.lookAt(0, 60, 0); scene.add(sun);
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(95, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffb36a, transparent: true, opacity: 0.28, fog: false }));
-  halo.position.set(1250, 210, -160); halo.lookAt(0, 60, 0); scene.add(halo);
+    // sun disc low over the sea to the south-west
+    const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(26, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffb347, fog: false }));
+    sunDisc.position.set(-60, 26, 420);
+    sunDisc.lookAt(0, 20, 0);
+    this.scene.add(sunDisc);
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(44, 32),
+      new THREE.MeshBasicMaterial({ color: 0xff7a2e, transparent: true, opacity: 0.35, fog: false }));
+    glow.position.set(-60, 26, 418);
+    glow.lookAt(0, 20, 0);
+    this.scene.add(glow);
 
-  // Clouds: flat white puffs drifting slowly.
-  const clouds = [];
-  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffe8d8, transparent: true, opacity: 0.85 });
-  for (let i = 0; i < 10; i++) {
-    const g = new THREE.Group();
-    for (let j = 0; j < 3; j++) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(14 + j * 5, 8, 6), cloudMat);
-      puff.scale.y = 0.45; puff.position.set(j * 16 - 16, j * 2, 0); g.add(puff);
+    this.camPos = new THREE.Vector3(0, 8, 14);
+    this.camLook = new THREE.Vector3(0, 1, 0);
+    window.addEventListener('resize', () => {
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  }
+
+  update(dt) {
+    const game = this.game;
+    if (game.shotCam) {
+      // staged screenshot camera: fixed pose, no smoothing
+      this.camera.position.copy(game.shotCam.pos);
+      this.camera.lookAt(game.shotCam.look);
+      return;
     }
-    g.position.set(-900 + i * 200, 260 + (i % 3) * 40, -700 + (i % 5) * 320);
-    scene.add(g); clouds.push(g);
+    const p = game.player;
+    const back = 9.5 + (p.inCar && p.car ? Math.abs(p.car.speed) * 0.12 : 0);
+    const up = p.inCar ? 4.2 : 3.4;
+    const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw);
+    const wantPos = new THREE.Vector3(
+      p.pos.x - fx * back, up + (p.inCar && p.car ? p.car.airY * 0.5 : 0), p.pos.z - fz * back);
+    const wantLook = new THREE.Vector3(p.pos.x + fx * 6, 1.4, p.pos.z + fz * 6);
+    const k = 1 - Math.pow(0.001, dt);
+    this.camPos.lerp(wantPos, k);
+    this.camLook.lerp(wantLook, k);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
   }
 
-  const hemi = new THREE.HemisphereLight(0xffe0b8, 0x4a3a4a, 1.85);
-  scene.add(hemi);
-  const sunLight = new THREE.DirectionalLight(0xffd0a0, 2.1);
-  sunLight.position.set(500, 320, -200);
-  scene.add(sunLight);
-  scene.fog = new THREE.Fog(PALETTE.fog, 420, 1350);
-  return { sky, sun, clouds };
-}
-
-export function createCamera() {
-  const cam = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 4000);
-  cam.position.set(0, 8, -14);
-  return cam;
-}
-
-// Chase camera: sits behind the focus point at yaw/pitch, lerps in, looks
-// slightly ahead of motion. `orbit` lets the mouse drag swing it around.
-export function updateCamera(cam, focus, yaw, pitch, dist, height, dt, snap) {
-  const cx = focus.x - Math.sin(yaw) * Math.cos(pitch) * dist;
-  const cz = focus.z - Math.cos(yaw) * Math.cos(pitch) * dist;
-  const cy = focus.y + height + Math.sin(pitch) * dist;
-  if (snap) { cam.position.set(cx, cy, cz); }
-  else {
-    const k = 1 - Math.exp(-8 * dt);
-    cam.position.x += (cx - cam.position.x) * k;
-    cam.position.y += (cy - cam.position.y) * k;
-    cam.position.z += (cz - cam.position.z) * k;
-  }
-  cam.lookAt(focus.x + Math.sin(yaw) * 4, focus.y + 1.6 + Math.sin(pitch) * dist, focus.z + Math.cos(yaw) * 4);
+  render() { this.renderer.render(this.scene, this.camera); }
 }

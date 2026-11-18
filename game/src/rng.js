@@ -1,5 +1,4 @@
-// Neon Bay v4 — deterministic random: mulberry32 plus a small Rng helper.
-// The city is generated from seed 1337 so every run builds the same streets.
+// Deterministic RNG for Neon Bay v5c — mulberry32, seeded per world/shots.
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -10,10 +9,13 @@ export function mulberry32(seed) {
   };
 }
 
-export class Rng {
-  constructor(seed) { this.next = mulberry32(seed); }
-  range(a, b) { return a + this.next() * (b - a); }
-  int(a, b) { return Math.floor(this.range(a, b + 1)); }
-  pick(arr) { return arr[Math.floor(this.next() * arr.length)]; }
-  chance(p) { return this.next() < p; }
+export function makeRng(seed) {
+  const next = mulberry32(seed);
+  return {
+    next,
+    range: (a, b) => a + (b - a) * next(),
+    int: (a, b) => Math.floor(a + (b - a + 1) * next()),
+    pick: (arr) => arr[Math.floor(next() * arr.length)],
+    chance: (p) => next() < p,
+  };
 }

@@ -1,55 +1,44 @@
-// Neon Bay v4 — 20 collectible neon tokens, $50 each. They float and spin
-// over roads, sidewalks, the plaza and the pier, and are picked up on foot
-// or by car within 3 m.
-import * as THREE from 'three';
-import { TOKEN_COUNT } from './config.js';
+// Neon Bay v5c — 20 collectible neon tokens, $50 each.
+import * as THREE from '../vendor/three.module.min.js';
+import { CFG } from './config.js';
 
-const SPOTS = [
-  [-288, -288], [-96, -192], [96, -288], [288, -192], [-192, -96], [0, -96],
-  [192, -288], [-288, 0], [96, 0], [288, 0], [-96, 96], [192, 96], [-288, 192],
-  [0, 192], [288, 288], [-192, 288], [48, 48], [384, -96], [384, 288], [452, 0],
-];
-
-export function createTokens(scene) {
-  const tokens = [];
-  const geo = new THREE.OctahedronGeometry(0.9);
-  for (let i = 0; i < TOKEN_COUNT; i++) {
-    const [x, z] = SPOTS[i];
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff2e88 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, 2.2, z);
-    scene.add(mesh);
-    tokens.push({ x, z, mesh, taken: false, phase: i * 0.7 });
+export class Tokens {
+  constructor(game, rng) {
+    this.game = game;
+    this.items = [];
+    const spots = [];
+    for (let i = 0; i < 20; i++) {
+      spots.push([rng.int(-4, 4) * 40 + rng.range(-6, 6), rng.int(-4, 4) * 40 + rng.range(-6, 6)]);
+    }
+    spots.push([135, 200], [95, 212], [-60, -44], [40, 64]);
+    const taken = spots.slice(0, 20);
+    for (const [x, z] of taken) {
+      const mesh = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.7),
+        new THREE.MeshBasicMaterial({ color: 0xff2e88 }),
+      );
+      mesh.position.set(x, 1.4, z);
+      game.scene.add(mesh);
+      this.items.push({ x, z, mesh, got: false });
+    }
   }
-  let collected = 0;
 
-  function update(dt, t, px, pz, onCollect) {
-    for (const tk of tokens) {
-      if (tk.taken) continue;
-      tk.mesh.rotation.y += dt * 2.2;
-      tk.mesh.position.y = 2.2 + Math.sin(t * 2 + tk.phase) * 0.4;
-      const dx = px - tk.x, dz = pz - tk.z;
-      if (dx * dx + dz * dz < 9) {
-        tk.taken = true;
-        tk.mesh.visible = false;
-        collected++;
-        if (onCollect) onCollect(tk);
+  get count() { return this.items.filter((t) => t.got).length; }
+
+  update(dt, t) {
+    const p = this.game.player;
+    for (const tok of this.items) {
+      if (tok.got) continue;
+      tok.mesh.rotation.y = t * 2;
+      tok.mesh.position.y = 1.4 + Math.sin(t * 3 + tok.x) * 0.25;
+      const d = Math.hypot(p.pos.x - tok.x, p.pos.z - tok.z);
+      if (d < 3) {
+        tok.got = true;
+        tok.mesh.visible = false;
+        this.game.cash += CFG.tokenValue;
+        this.game.hud?.toast('Neon token', `+$${CFG.tokenValue}  (${this.count}/20)`);
+        this.game.audio?.cash();
       }
     }
   }
-
-  function reset() {
-    collected = 0;
-    for (const tk of tokens) { tk.taken = false; tk.mesh.visible = true; }
-  }
-
-  function setCollected(n) {
-    collected = 0;
-    for (const tk of tokens) {
-      if (collected < n) { tk.taken = true; tk.mesh.visible = false; collected++; }
-      else { tk.taken = false; tk.mesh.visible = true; }
-    }
-  }
-
-  return { tokens, get collected() { return collected; }, update, reset, setCollected };
 }

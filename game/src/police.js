@@ -1,221 +1,170 @@
-// Neon Bay v4 — the wanted system. Cruisers spawn by wanted level, chase on
-// the road graph (BFS), ram up close, PIT at 3+ stars, and set roadblocks at
-// 3+ stars. On foot, a cruiser that gets close arrests the player. During a
-// vault hold the cruisers ring the hold point instead of ramming.
+// Neon Bay v5c — wanted level and police.
+// Fixes built in: spawnCruiser does NOT snap explicit spawn coordinates to
+// the nearest road node (only random spawns get snapped); setWanted starts
+// 10 heat into the band so a staged shot never loses a star while settling.
+import { CFG } from './config.js';
 import { Car } from './vehicles.js';
-import { findPath } from './traffic.js';
-import { PITCH, GRID_K, policeTop, clamp, dist2 } from './config.js';
-import { Rng } from './rng.js';
 
-export function createPolice(scene, colliders) {
-  const rng = new Rng(4242);
-  let wanted = 0;
-  let cleanTimer = 0;
-  let roadblockTimer = 10;
-  let arrestTimer = 0;
-  let standoff = null;
-  let respawnTimer = 0;
-  const cruisers = [];
+const nearestNode = (x, z) => [
+  Math.max(-160, Math.min(160, Math.round(x / 40) * 40)),
+  Math.max(-160, Math.min(160, Math.round(z / 40) * 40)),
+];
 
-  function spawnCruiser(x, z) {
-    const c = new Car(scene, 'cruiser', x, z, rng.range(0, Math.PI * 2));
-    c.mode = 'chase'; c.path = []; c.pathIdx = 0; c.repath = 0;
-    c.pitCool = 0; c.ramCool = 0; c.blockTimer = 0;
-    cruisers.push(c);
-    return c;
-  }
-
-  function spawnNear(px, pz, yaw) {
-    // Spawn on the player's road, 40-80 m behind their direction of
-    // travel, snapped to the nearest road centreline so the cruiser
-    // never spawns inside a building. (Snapping to a grid node instead
-    // could push the spawn a whole block away.)
-    const fx = Math.sin(yaw || 0), fz = Math.cos(yaw || 0);
-    const d = rng.range(40, 80);
-    let x = px - fx * d, z = pz - fz * d;
-    const ax = Math.round(x / PITCH) * PITCH, az = Math.round(z / PITCH) * PITCH;
-    if (Math.abs(x - ax) < Math.abs(z - az)) x = ax; else z = az;
-    return spawnCruiser(clamp(x, -400, 420), clamp(z, -400, 420));
-  }
-
-  function addWanted(n) {
-    wanted = clamp(wanted + n, 0, 5);
-    cleanTimer = 0;
-  }
-  function setWanted(n) { wanted = clamp(n, 0, 5); cleanTimer = 0; }
-
-  function setStandoff(point) { standoff = point; }
-
-  function damageCruiser(c, n) {
-    c.damage(n * 34);
-    if (c.dead) {
-      c.smoke = 6;
-      respawnTimer = 8;
+// BFS over the road grid; returns a list of waypoints from (fx,fz) to (tx,tz).
+export function bfsPath(fx, fz, tx, tz) {
+  const key = (x, z) => `${x},${z}`;
+  const from = nearestNode(fx, fz);
+  const to = nearestNode(tx, tz);
+  const prev = new Map([[key(from[0], from[1]), null]]);
+  const q = [from];
+  while (q.length) {
+    const [x, z] = q.shift();
+    if (x === to[0] && z === to[1]) break;
+    for (const [dx, dz] of [[40, 0], [-40, 0], [0, 40], [0, -40]]) {
+      const nx = x + dx, nz = z + dz;
+      if (Math.abs(nx) > 160 || Math.abs(nz) > 160) continue;
+      if (!prev.has(key(nx, nz))) { prev.set(key(nx, nz), [x, z]); q.push([nx, nz]); }
     }
   }
+  const path = [];
+  let cur = to;
+  if (!prev.has(key(cur[0], cur[1]))) return [[tx, tz]];
+  while (cur) { path.unshift(cur); cur = prev.get(key(cur[0], cur[1])); }
+  path.push([tx, tz]);
+  return path;
+}
 
-  function update(dt, t, player, onBusted) {
-    // Keep the cruiser count matched to the wanted level.
-    const wantCount = wanted;
-    while (cruisers.filter(c => !c.dead).length < wantCount) spawnNear(player.x, player.z, player.yaw);
-    while (cruisers.filter(c => !c.dead).length > wantCount) {
-      const c = cruisers.find(c => !c.dead);
-      if (!c) break;
-      c.remove(); cruisers.splice(cruisers.indexOf(c), 1);
+export class Police {
+  constructor(game, rng) {
+    this.game = game;
+    this.rng = rng;
+    this.level = 0;
+    this.heat = 0;
+    this.cruisers = [];
+    this.roadblockAt = 0;
+    this.roadblockCars = [];
+    this.shootAt = 0;
+  }
+
+  setWanted(level) {
+    this.level = Math.max(0, Math.min(5, level));
+    // start 10 heat INTO the band, never exactly on its threshold
+    this.heat = this.level === 0 ? 0 : (this.level - 1) * CFG.wantedHeatPerStar + 10;
+    this.syncCruisers();
+  }
+
+  addHeat(n) {
+    if (this.level >= 5) return;
+    this.heat += n;
+    const lvl = Math.min(5, Math.floor(this.heat / CFG.wantedHeatPerStar) + 1);
+    if (lvl !== this.level) { this.level = lvl; this.syncCruisers(); }
+  }
+
+  decay(dt) {
+    if (this.level === 0) return;
+    this.heat -= dt * 1.2;
+    if (this.heat < 0) { this.heat = 0; this.level = 0; this.syncCruisers(); return; }
+    const lvl = Math.min(5, Math.floor(this.heat / CFG.wantedHeatPerStar) + 1);
+    if (lvl !== this.level) { this.level = lvl; this.syncCruisers(); }
+  }
+
+  // Explicit coords are used as-is (staged shots need exact placement).
+  // Only random spawns (no coords given) snap to a road node.
+  spawnCruiser(x, z) {
+    let sx = x, sz = z;
+    if (sx === undefined || sz === undefined) {
+      const p = this.game.player;
+      const a = this.rng.range(0, Math.PI * 2);
+      const d = this.rng.range(40, 80);
+      [sx, sz] = nearestNode(p.pos.x + Math.sin(a) * d, p.pos.z + Math.cos(a) * d);
     }
-    // Heat decays after 60 s clean.
-    if (wanted > 0) {
-      cleanTimer += dt;
-      if (cleanTimer > 60) { wanted--; cleanTimer = 0; }
+    const car = new Car(this.game, 'cruiser', sx, sz, 0, 0x11151c, true);
+    car.isTraffic = false;
+    car.slot = this.cruisers.length;
+    this.cruisers.push(car);
+    return car;
+  }
+
+  syncCruisers() {
+    const want = this.level === 0 ? 0 : Math.min(6, 1 + this.level);
+    while (this.cruisers.length < want) this.spawnCruiser();
+    while (this.cruisers.length > want) {
+      const c = this.cruisers.pop();
+      this.game.scene.remove(c.mesh);
     }
-    // Respawn a disabled cruiser while the heat is still on.
-    if (respawnTimer > 0) {
-      respawnTimer -= dt;
-      if (respawnTimer <= 0 && wanted > 0) spawnNear(player.x, player.z, player.yaw);
+    this.cruisers.forEach((c, i) => { c.slot = i; });
+  }
+
+  // Roadblock: two cruisers across the road ahead of the player.
+  maybeRoadblock(now) {
+    if (this.level < 3) return;
+    if (now - this.roadblockAt < 22) return;
+    this.roadblockAt = now;
+    const p = this.game.player;
+    const f = p.inCar && p.car ? p.car.forward() : { x: Math.sin(p.yaw), z: Math.cos(p.yaw) };
+    const cx = p.pos.x + f.x * 45, cz = p.pos.z + f.z * 45;
+    const px = -f.z, pz = f.x; // perpendicular
+    for (const s of [-4, 4]) {
+      const c = this.spawnCruiser(cx + px * s, cz + pz * s);
+      c.yaw = Math.atan2(f.x, f.z) + Math.PI / 2;
+      this.roadblockCars.push(c);
     }
-    // Roadblocks at 3+ stars, every 22 s.
-    if (wanted >= 3) {
-      roadblockTimer -= dt;
-      if (roadblockTimer <= 0) {
-        roadblockTimer = 22;
-        const ahead = 45;
-        const bx = player.x + Math.sin(player.yaw) * ahead;
-        const bz = player.z + Math.cos(player.yaw) * ahead;
-        const rx = Math.round(bx / PITCH) * PITCH;
-        const rz = Math.round(bz / PITCH) * PITCH;
-        for (const s of [-1, 1]) {
-          const c = spawnCruiser(rx + Math.cos(player.yaw) * s * 5, rz - Math.sin(player.yaw) * s * 5);
-          c.mode = 'block'; c.blockTimer = 7;
-          c.yaw = player.yaw + Math.PI / 2;
-          c.group.rotation.y = c.yaw;
-        }
+  }
+
+  update(dt, now) {
+    this.decay(dt);
+    this.maybeRoadblock(now);
+    const p = this.game.player;
+    const tx = p.pos.x, tz = p.pos.z;
+    const pCar = p.inCar && p.car ? p.car : null;
+    this.cruisers.forEach((c, i) => {
+      // slot controller: each cruiser aims at a different offset around the player
+      const slotA = (i / Math.max(1, this.cruisers.length)) * Math.PI * 2 + now * 0.05;
+      const gx = tx + Math.sin(slotA) * 9, gz = tz + Math.cos(slotA) * 9;
+      const path = bfsPath(c.pos.x, c.pos.z, gx, gz);
+      const wp = path.length > 1 ? path[1] : path[0];
+      const want = Math.atan2(wp[0] - c.pos.x, wp[1] - c.pos.z);
+      let dy = want - c.yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      const d = Math.hypot(tx - c.pos.x, tz - c.pos.z);
+      // close in directly once near the player (BFS nodes are coarse)
+      const driveTo = d < 25 ? [tx, tz] : wp;
+      const want2 = Math.atan2(driveTo[0] - c.pos.x, driveTo[1] - c.pos.z);
+      let dy2 = want2 - c.yaw;
+      while (dy2 > Math.PI) dy2 -= Math.PI * 2;
+      while (dy2 < -Math.PI) dy2 += Math.PI * 2;
+      const steer = dy2 > 0.12 ? 1 : dy2 < -0.12 ? -1 : 0;
+      const sev = c.step(dt, { fwd: 1, steer, brake: Math.abs(dy2) > 1.4 && c.speed > 5 },
+        this.game.city.colliders);
+      // ram: touch the player car and shove it
+      if (pCar && d < 4.5 && c.speed > 3) {
+        const push = 2.2;
+        pCar.pos.x += (pCar.pos.x - c.pos.x) / Math.max(1, d) * push * dt * 10;
+        pCar.pos.z += (pCar.pos.z - c.pos.z) / Math.max(1, d) * push * dt * 10;
+        this.game.player.damage(4 * dt * 10, 'ram');
       }
-    }
-    const pSpeed = player.car ? Math.abs(player.car.speed) : 0;
-    for (const c of cruisers) {
-      if (c.dead) { c.step(0, 0, false, dt, colliders, cruisers); continue; }
-      c.pitCool -= dt; c.ramCool -= dt;
-      if (c.mode === 'block') {
-        c.blockTimer -= dt;
-        c.step(0, 0, true, dt, colliders, cruisers);
-        if (c.blockTimer <= 0) c.mode = 'chase';
-        continue;
+      // PIT at 3+ stars: a fast cruiser alongside the player shoves sideways
+      if (pCar && this.level >= 3 && d < 5 && d > 2.5 && c.speed > 20) {
+        const side = Math.sign((pCar.pos.x - c.pos.x) * Math.cos(c.yaw) - (pCar.pos.z - c.pos.z) * Math.sin(c.yaw)) || 1;
+        pCar.pos.x += Math.cos(c.yaw) * side * 1.1 * dt * 10;
+        pCar.pos.z -= Math.sin(c.yaw) * side * 1.1 * dt * 10;
+        pCar.speed *= (1 - 0.12 * dt * 10);
       }
-      const d = Math.hypot(player.x - c.x, player.z - c.z);
-      if (standoff) {
-        // Ring the hold point at its radius, facing in.
-        const ring = standoff.r;
-        const idx = cruisers.indexOf(c);
-        const a = (idx / Math.max(1, cruisers.length)) * Math.PI * 2 + t * 0.05;
-        const tx = standoff.x + Math.cos(a) * ring;
-        const tz = standoff.z + Math.sin(a) * ring;
-        steerTo(c, tx, tz, dt, colliders, policeTop(wanted));
-        continue;
-      }
-      if (d < 26 && player.car) {
-        // Close in: ram / PIT at 3+ stars. Each cruiser holds its own
-        // slot behind the player (lane + following distance) so the pack
-        // fans out instead of bunching up and bleeding speed on each
-        // other's separation. Speed is regulated to hold the slot, so a
-        // cruiser that falls behind closes in and one that is too close
-        // backs off — no more overshoot-and-loop.
-        const idx = cruisers.indexOf(c);
-        const lane = (idx % 3 - 1) * 4.5;
-        const slot = 4 + (idx % 2) * 5;
-        const fx = Math.sin(player.yaw), fz = Math.cos(player.yaw);
-        const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
-        const behind = (player.x - c.x) * fx + (player.z - c.z) * fz;
-        const lat = (c.x - player.x) * rx + (c.z - player.z) * rz;
-        if (d < 15 && behind > 0) {
-          let dy = player.yaw - c.yaw;
-          while (dy > Math.PI) dy -= Math.PI * 2;
-          while (dy < -Math.PI) dy += Math.PI * 2;
-          const steer = clamp(dy * 1.4 + (lane - lat) * 0.12, -1, 1);
-          c.step(1, steer, false, dt, colliders, cruisers);
-          const top = clamp(pSpeed + (d - slot) * 0.8, 10, policeTop(wanted));
-          if (c.speed > top) c.speed = top;
-        } else {
-          const tx = player.x - fx * slot + rx * lane;
-          const tz = player.z - fz * slot + rz * lane;
-          steerTo(c, tx, tz, dt, colliders, d < 15 ? Math.max(12, pSpeed + 4) : policeTop(wanted));
-        }
-        if (d < 6.5 && c.ramCool <= 0) {
-          c.ramCool = 1.0;
-          player.car.damage(6);
-          player.car.speed *= 0.82;
-        }
-        if (wanted >= 3 && c.pitCool <= 0 && pSpeed > 18) {
-          const fx = Math.sin(player.yaw), fz = Math.cos(player.yaw);
-          const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
-          const relX = c.x - player.x, relZ = c.z - player.z;
-          const lat = Math.abs(relX * rx + relZ * rz);
-          const lon = Math.abs(relX * fx + relZ * fz);
-          if (lat < 3.4 && lon < 5) {
-            c.pitCool = 3;
-            player.car.speed *= 0.88;
-            const s = (relX * rx + relZ * rz) >= 0 ? 1 : -1;
-            player.car.x += rx * s * 1.1; player.car.z += rz * s * 1.1;
-          }
-        }
-      } else {
-        // Route on the road graph toward the player's node.
-        c.repath -= dt;
-        if (c.repath <= 0 || !c.path || c.pathIdx >= c.path.length) {
-          c.repath = 1.5;
-          const from = { i: Math.round(c.x / PITCH), j: Math.round(c.z / PITCH) };
-          const to = { i: clamp(Math.round(player.x / PITCH), -GRID_K, GRID_K), j: clamp(Math.round(player.z / PITCH), -GRID_K, GRID_K) };
-          c.path = (findPath(from, to) || []).slice(1); // skip the start node we already stand on
-          c.pathIdx = 0;
-        }
-        const wp = c.path[c.pathIdx];
-        if (wp) {
-          const wd = Math.hypot(wp.x - c.x, wp.z - c.z);
-          if (wd < 7) c.pathIdx++;
-          else steerTo(c, wp.x, wp.z, dt, colliders, policeTop(wanted));
-        } else {
-          // No waypoint (e.g. the cruiser is already on the player's
-          // node): steer straight at the player instead of freezing.
-          steerTo(c, player.x, player.z, dt, colliders, policeTop(wanted));
-        }
-      }
-    }
-    // Foot arrest: a cruiser close to a player on foot, held for 1.5 s.
-    if (player.onFoot && wanted > 0) {
-      const near = cruisers.some(c => !c.dead && dist2(c.x, c.z, player.x, player.z) < 8 * 8);
+      if (sev === 2) c.speed *= 0.9;
+    });
+    // cops shoot at the player on foot at 3+ stars
+    if (this.level >= 3 && !p.inCar && now - this.shootAt > 1.1) {
+      const near = this.cruisers.some((c) => Math.hypot(c.pos.x - tx, c.pos.z - tz) < 40);
       if (near) {
-        arrestTimer += dt;
-        if (arrestTimer > 1.5 && onBusted) { arrestTimer = 0; onBusted(); }
-      } else arrestTimer = 0;
-    } else arrestTimer = 0;
+        this.shootAt = now;
+        this.game.player.damage(6, 'shot');
+        this.game.effects?.muzzle(cruisersPos(this));
+      }
+    }
   }
-
-  function steerTo(c, tx, tz, dt, colliders, top) {
-    const dx = tx - c.x, dz = tz - c.z;
-    const wantYaw = Math.atan2(dx, dz);
-    let dy = wantYaw - c.yaw;
-    while (dy > Math.PI) dy -= Math.PI * 2;
-    while (dy < -Math.PI) dy += Math.PI * 2;
-    const steer = clamp(dy * 1.6, -1, 1);
-    c.step(1, steer, false, dt, colliders, cruisers);
-    if (c.speed > top) c.speed = top;
-  }
-
-  function reset() {
-    for (const c of cruisers) c.remove();
-    cruisers.length = 0;
-    wanted = 0; cleanTimer = 0; arrestTimer = 0; standoff = null;
-  }
-
-  // Debug/test hook: place a cruiser exactly (screenshot staging).
-  function spawnAt(x, z, yaw, mode) {
-    const c = spawnCruiser(x, z);
-    c.yaw = yaw; c.group.rotation.y = yaw;
-    if (mode) { c.mode = mode; if (mode === 'block') c.blockTimer = 999; }
-    return c;
-  }
-
-  return {
-    get wanted() { return wanted; },
-    cruisers, addWanted, setWanted, setStandoff, damageCruiser, update, reset, spawnAt,
-  };
+}
+function cruisersPos(police) {
+  const c = police.cruisers[0];
+  return c ? { x: c.pos.x, z: c.pos.z } : { x: 0, z: 0 };
 }

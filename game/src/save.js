@@ -1,27 +1,30 @@
-// Neon Bay v4 — save: cash, rep, mission progress, tokens, gun and sports
-// unlock persist in localStorage. The world itself (traffic, police,
-// positions) resets on load; only the player's progress carries over.
-const KEY = 'neon-bay-v4';
+// Neon Bay v5c — localStorage save / load (cash, rep, tokens, missions done).
+export class SaveSys {
+  constructor(game) {
+    this.game = game;
+    this.key = 'neon-bay-v5c-save';
+  }
 
-export function saveGame(s) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify({
-      cash: s.cash, rep: s.rep, missionIndex: s.missionIndex,
-      tokens: s.tokens, hasGun: s.hasGun, sports: s.sports,
-    }));
-  } catch (e) { /* storage unavailable: play on without saving */ }
-}
+  save() {
+    try {
+      localStorage.setItem(this.key, JSON.stringify({
+        cash: this.game.cash,
+        rep: this.game.rep,
+        missionsDone: this.game.missions.done,
+        tokens: this.game.tokens.count,
+      }));
+    } catch (e) { /* storage unavailable */ }
+  }
 
-export function loadGame() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (typeof d.cash !== 'number') return null;
-    return d;
-  } catch (e) { return null; }
-}
+  load() {
+    try {
+      const raw = localStorage.getItem(this.key);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  }
 
-export function clearSave() {
-  try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+  clear() {
+    try { localStorage.removeItem(this.key); } catch (e) { /* ignore */ }
+  }
 }
