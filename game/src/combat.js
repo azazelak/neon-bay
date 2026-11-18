@@ -1,111 +1,63 @@
-// Neon Bay — combat: punch up close, hitscan pistol with a 12-round
-// magazine and reload. Three hits disable a cruiser.
+// Neon Bay v4 — combat: fists and a hitscan pistol. The pistol holds 12
+// rounds, reloads in 1.2 s, and takes 3 hits to disable a cruiser. Punching
+// works up close on foot. Both return an event the effects and audio modules
+// can play from.
+import { clamp } from './config.js';
 
-import * as THREE from 'three';
-import { CFG } from './config.js';
+export function createCombat() {
+  let hasGun = false;
+  let ammo = 0;
+  let reloading = 0;
+  let punchCool = 0;
 
-export class Combat {
-  constructor(scene, effects, audio) {
-    this.scene = scene;
-    this.effects = effects;
-    this.audio = audio;
-    this.hasGun = false;
-    this.ammo = 0;
-    this.reloading = 0;
-    this.cooldown = 0;
-    this.tracer = null;
-  }
-
-  get armed() { return this.hasGun; }
-
-  giveGun() {
-    this.hasGun = true;
-    this.ammo = CFG.pistolMag;
-  }
-
-  update(dt) {
-    this.cooldown -= dt;
-    if (this.reloading > 0) {
-      this.reloading -= dt;
-      if (this.reloading <= 0) this.ammo = CFG.pistolMag;
+  function update(dt) {
+    if (reloading > 0) {
+      reloading -= dt;
+      if (reloading <= 0) ammo = 12;
     }
-    if (this.tracer) {
-      this.tracer.material.opacity -= dt * 3;
-      if (this.tracer.material.opacity <= 0) {
-        this.scene.remove(this.tracer);
-        this.tracer = null;
-      }
-    }
+    punchCool -= dt;
   }
 
-  reload() {
-    if (!this.hasGun || this.ammo === CFG.pistolMag || this.reloading > 0) return;
-    this.reloading = 1.1;
-    if (this.audio) this.audio.reload();
-  }
-
-  // Hitscan shot from (ox, oy, oz) along a heading. Returns what it hit.
-  shoot(ox, oy, oz, heading, targets) {
-    if (!this.hasGun || this.cooldown > 0 || this.reloading > 0 || this.ammo <= 0) return null;
-    this.cooldown = 0.22;
-    this.ammo--;
-    if (this.audio) this.audio.shot();
-    const dx = -Math.sin(heading);
-    const dz = -Math.cos(heading);
-    const range = CFG.pistolRange;
-    const endX = ox + dx * range;
-    const endZ = oz + dz * range;
-    let best = null;
-    let bestT = range;
-    for (const t of targets) {
-      // Ray vs circle in the ground plane.
-      const rx = t.x - ox;
-      const rz = t.z - oz;
-      const along = rx * dx + rz * dz;
-      if (along < 0 || along > range) continue;
-      const px = ox + dx * along;
-      const pz = oz + dz * along;
-      const perp = Math.hypot(t.x - px, t.z - pz);
-      if (perp < (t.radius || 2) && along < bestT) {
-        bestT = along;
-        best = t;
-      }
+  function shoot(aim, police) {
+    if (!hasGun || reloading > 0 || ammo <= 0) return { fired: false };
+    ammo--;
+    if (ammo === 0) reloading = 1.2;
+    // Nearest cruiser inside the aim cone.
+    let best = null, bestD = 60;
+    for (const c of police.cruisers) {
+      if (c.dead) continue;
+      const dx = c.x - aim.x, dz = c.z - aim.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 60 || d > bestD) continue;
+      const dot = (dx * aim.dx + dz * aim.dz) / (d || 1);
+      if (dot > 0.985) { best = c; bestD = d; }
     }
-    const hitX = ox + dx * bestT;
-    const hitZ = oz + dz * bestT;
-    // Tracer line from the muzzle to the hit point.
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(ox, oy, oz),
-      new THREE.Vector3(hitX, 1.2, hitZ),
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color: 0xffd42a, transparent: true, opacity: 0.9 });
-    if (this.tracer) this.scene.remove(this.tracer);
-    this.tracer = new THREE.Line(geo, mat);
-    this.scene.add(this.tracer);
     if (best) {
-      if (this.effects) this.effects.burst(hitX, 1.2, hitZ, 0xff7a2a, 10);
-      return best;
+      police.damageCruiser(best, 1);
+      return { fired: true, hit: true, x: best.x, z: best.z, dist: bestD };
     }
-    return null;
+    return { fired: true, hit: false, x: aim.x + aim.dx * 55, z: aim.z + aim.dz * 55, dist: 55 };
   }
 
-  // A punch: short range, knocks a pedestrian down.
-  punch(px, pz, heading, peds) {
-    const dx = -Math.sin(heading);
-    const dz = -Math.cos(heading);
-    for (const p of peds) {
-      if (p.state !== 'walk') continue;
-      const rx = p.x - px;
-      const rz = p.z - pz;
-      const along = rx * dx + rz * dz;
-      const perp = Math.hypot(p.x - (px + dx * along), p.z - (pz + dz * along));
-      if (along > 0 && along < 2.4 && perp < 1.2) {
-        p.state = 'down';
-        p.timer = 4;
-        if (this.effects) this.effects.burst(p.x, 1.4, p.z, 0xffffff, 6);
-        return p;
+  function punch(player, police) {
+    if (punchCool > 0) return { hit: false };
+    punchCool = 0.45;
+    for (const c of police.cruisers) {
+      if (c.dead) continue;
+      const d = Math.hypot(c.x - player.x, c.z - player.z);
+      if (d < 3) {
+        police.damageCruiser(c, 1);
+        return { hit: true, x: c.x, z: c.z };
       }
     }
-    return null;
+    return { hit: false };
   }
+
+  return {
+    get hasGun() { return hasGun; },
+    get ammo() { return ammo; },
+    get reloading() { return reloading > 0; },
+    giveGun() { hasGun = true; ammo = 12; },
+    update, shoot, punch,
+  };
 }

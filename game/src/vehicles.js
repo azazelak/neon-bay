@@ -1,139 +1,141 @@
-// Neon Bay — cars: box-built bodies, arcade physics, police livery.
-// A Car is one mesh group plus speed/heading; the world moves it.
-
+// Neon Bay v4 — Car: a box-built car with arcade physics. Steering, throttle
+// and brake are -1..1 inputs; the car accelerates toward its kind's top speed,
+// grips through turns, and slides a little when handbraking. Collides with
+// building AABBs as a circle and with other cars by soft separation.
 import * as THREE from 'three';
 import { CAR_KINDS, clamp } from './config.js';
 
-let carId = 0;
+const bodyGeo = new THREE.BoxGeometry(1, 1, 1);
+const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.34, 12);
 
 export class Car {
-  constructor(scene, kind, color, x = 0, z = 0, heading = 0) {
-    this.id = carId++;
-    this.kind = kind;
-    this.spec = CAR_KINDS[kind];
-    this.color = color;
-    this.x = x;
-    this.z = z;
-    this.heading = heading;
-    this.speed = 0;
-    this.steer = 0;
-    this.disabled = false;
-    this.hits = 0;
+  constructor(scene, kind, x, z, yaw) {
+    this.kind = CAR_KINDS[kind] || CAR_KINDS.sedan;
+    this.x = x; this.z = z; this.yaw = yaw || 0;
+    this.speed = 0; this.hp = 100; this.dead = false;
+    this.smoke = 0; // seconds of smoke emission left
     this.group = new THREE.Group();
-    this.buildMesh(scene);
-    this.group.position.set(x, 0, z);
-    this.group.rotation.y = heading;
-    scene.add(this.group);
-  }
-
-  buildMesh(scene) {
-    const { len, wid } = this.spec;
-    const bodyMat = new THREE.MeshLambertMaterial({ color: this.color });
-    const darkMat = new THREE.MeshLambertMaterial({ color: 0x1a2028 });
-    const glassMat = new THREE.MeshLambertMaterial({ color: 0x2a3a55 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(wid, 0.75, len), bodyMat);
-    body.position.y = 0.62;
-    this.group.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(wid * 0.86, 0.62, len * 0.46), glassMat);
-    cabin.position.set(0, 1.28, -len * 0.04);
-    this.group.add(cabin);
-    // Hood scoop + racing stripe on the muscle car.
-    if (this.kind === 'muscle') {
-      const scoop = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 0.9), darkMat);
-      scoop.position.set(0, 1.06, len * 0.28);
-      this.group.add(scoop);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, len * 0.98), new THREE.MeshLambertMaterial({ color: 0xffd42a }));
-      stripe.position.set(0, 1.0, 0);
-      this.group.add(stripe);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: this.kind.color });
+    const darkMat = new THREE.MeshLambertMaterial({ color: 0x14161c });
+    const glassMat = new THREE.MeshLambertMaterial({ color: 0x2c3e55 });
+    const L = this.kind.len, W = this.kind.wid;
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.scale.set(W, 0.75, L); body.position.y = 0.62; this.group.add(body);
+    const cabin = new THREE.Mesh(bodyGeo, glassMat);
+    cabin.scale.set(W * 0.82, 0.62, L * 0.48); cabin.position.set(0, 1.28, -L * 0.06); this.group.add(cabin);
+    const hood = new THREE.Mesh(bodyGeo, bodyMat);
+    hood.scale.set(W * 0.9, 0.16, L * 0.2); hood.position.set(0, 1.02, L * 0.36); this.group.add(hood);
+    // Headlights + taillights.
+    const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+    const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+    for (const s of [-1, 1]) {
+      const hl = new THREE.Mesh(bodyGeo, lightMat);
+      hl.scale.set(0.4, 0.22, 0.1); hl.position.set(s * W * 0.32, 0.66, L / 2 + 0.02); this.group.add(hl);
+      const tl = new THREE.Mesh(bodyGeo, tailMat);
+      tl.scale.set(0.4, 0.22, 0.1); tl.position.set(s * W * 0.32, 0.66, -L / 2 - 0.02); this.group.add(tl);
     }
-    // Pickup bed.
-    if (this.kind === 'pickup') {
-      const bed = new THREE.Mesh(new THREE.BoxGeometry(wid * 0.8, 0.3, len * 0.34), darkMat);
-      bed.position.set(0, 1.05, len * 0.28);
-      this.group.add(bed);
+    // Police light bar on cruisers.
+    if (kind === 'cruiser') {
+      const bar = new THREE.Mesh(bodyGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }));
+      bar.scale.set(W * 0.7, 0.18, 0.5); bar.position.set(0, 1.66, -L * 0.06); this.group.add(bar);
+      this.barL = new THREE.Mesh(bodyGeo, new THREE.MeshBasicMaterial({ color: 0xff2222 }));
+      this.barL.scale.set(W * 0.32, 0.22, 0.54); this.barL.position.set(-W * 0.18, 1.66, -L * 0.06);
+      this.group.add(this.barL);
+      this.barR = new THREE.Mesh(bodyGeo, new THREE.MeshBasicMaterial({ color: 0x2244ff }));
+      this.barR.scale.set(W * 0.32, 0.22, 0.54); this.barR.position.set(W * 0.18, 1.66, -L * 0.06);
+      this.group.add(this.barR);
+      const door = new THREE.Mesh(bodyGeo, new THREE.MeshLambertMaterial({ color: 0xf0f0f0 }));
+      door.scale.set(0.06, 0.6, L * 0.4); door.position.set(W / 2 + 0.01, 0.7, 0); this.group.add(door);
+      const door2 = door.clone(); door2.position.x = -W / 2 - 0.01; this.group.add(door2);
     }
-    // Wheels.
-    const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.28, 12);
-    wheelGeo.rotateZ(Math.PI / 2);
-    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
+    if (kind === 'taxi') {
+      const sign = new THREE.Mesh(bodyGeo, new THREE.MeshBasicMaterial({ color: 0xffe94a }));
+      sign.scale.set(0.9, 0.3, 0.5); sign.position.set(0, 1.72, -L * 0.06); this.group.add(sign);
+    }
+    if (kind === 'muscle') {
+      const scoop = new THREE.Mesh(bodyGeo, darkMat);
+      scoop.scale.set(0.8, 0.22, 1.1); scoop.position.set(0, 1.08, L * 0.22); this.group.add(scoop);
+    }
     this.wheels = [];
-    for (const [wx, wz] of [[-wid / 2, len * 0.32], [wid / 2, len * 0.32], [-wid / 2, -len * 0.32], [wid / 2, -len * 0.32]]) {
-      const w = new THREE.Mesh(wheelGeo, wheelMat);
-      w.position.set(wx, 0.36, wz);
-      this.group.add(w);
-      this.wheels.push(w);
+    for (const [wx, wz] of [[-W / 2, L * 0.32], [W / 2, L * 0.32], [-W / 2, -L * 0.32], [W / 2, -L * 0.32]]) {
+      const wheel = new THREE.Mesh(wheelGeo, darkMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(wx, 0.42, wz);
+      this.group.add(wheel); this.wheels.push(wheel);
     }
-    // Headlights (front = -z in local space) and taillights.
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2c0 });
-    const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-    for (const side of [-1, 1]) {
-      const h = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), headMat);
-      h.position.set(side * wid * 0.3, 0.62, -len / 2 - 0.02);
-      this.group.add(h);
-      const t = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), tailMat);
-      t.position.set(side * wid * 0.3, 0.62, len / 2 + 0.02);
-      this.group.add(t);
-    }
-    // Police: white doors + red/blue light bar.
-    if (this.kind === 'police') {
-      const doorMat = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
-      for (const side of [-1, 1]) {
-        const door = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.6, 1.5), doorMat);
-        door.position.set(side * (wid / 2 + 0.02), 0.62, 0);
-        this.group.add(door);
-      }
-      this.barRed = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0xff2020 }));
-      this.barRed.position.set(-0.4, 1.72, -0.1);
-      this.group.add(this.barRed);
-      this.barBlue = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0x2050ff }));
-      this.barBlue.position.set(0.4, 1.72, -0.1);
-      this.group.add(this.barBlue);
-    }
-  }
-
-  // Arcade step: throttle -1..1, steer -1..1.
-  drive(throttle, steer, dt) {
-    if (this.disabled) {
-      this.speed *= Math.max(0, 1 - dt * 2);
-    } else {
-      const top = this.spec.top;
-      if (throttle > 0) {
-        this.speed += this.spec.accel * throttle * dt;
-      } else if (throttle < 0) {
-        // Brake while moving forward, reverse once nearly stopped.
-        if (this.speed > 0.5) this.speed -= 30 * dt;
-        else this.speed -= this.spec.accel * 0.7 * dt;
-      }
-      this.speed = clamp(this.speed, -top * 0.35, top);
-      if (Math.abs(throttle) < 0.05) this.speed *= Math.max(0, 1 - dt * 0.6);
-    }
-    const turn = steer * 2.1 * clamp(Math.abs(this.speed) / 8, 0, 1) * (this.speed >= 0 ? 1 : -1);
-    this.heading += turn * dt;
-    const fx = -Math.sin(this.heading);
-    const fz = -Math.cos(this.heading);
-    this.x += fx * this.speed * dt;
-    this.z += fz * this.speed * dt;
-    this.group.position.set(this.x, 0, this.z);
-    this.group.rotation.y = this.heading;
-    for (const w of this.wheels) w.rotation.x += this.speed * dt * 2.4;
-  }
-
-  // Direct placement (spawns, teleports, shots).
-  place(x, z, heading) {
-    this.x = x;
-    this.z = z;
-    this.heading = heading;
-    this.speed = 0;
     this.group.position.set(x, 0, z);
-    this.group.rotation.y = heading;
+    this.group.rotation.y = yaw;
+    scene.add(this.group);
+    this.scene = scene;
   }
 
-  flashLights(time) {
-    if (!this.barRed) return;
-    const on = Math.sin(time * 9) > 0;
-    this.barRed.visible = on;
-    this.barBlue.visible = !on;
+  // Drive one step. Returns nothing; callers read this.speed / position.
+  step(throttle, steer, brake, dt, colliders, others) {
+    if (this.dead) { this.speed *= 1 - 3 * dt; }
+    else {
+      const top = this.kind.top;
+      if (throttle > 0) this.speed += this.kind.accel * throttle * dt;
+      else if (throttle < 0) this.speed += this.kind.accel * 0.7 * throttle * dt; // reverse
+      if (brake) this.speed -= Math.sign(this.speed) * 26 * dt;
+      // Drag + rolling resistance.
+      this.speed -= this.speed * 0.35 * dt;
+      if (Math.abs(this.speed) < 0.05 && throttle === 0) this.speed = 0;
+      this.speed = clamp(this.speed, -12, top);
+      const grip = brake ? this.kind.grip * 0.55 : this.kind.grip;
+      this.yaw += steer * grip * 0.55 * dt * clamp(Math.abs(this.speed) / 8, 0, 1) * Math.sign(this.speed || 1);
+    }
+    const nx = this.x + Math.sin(this.yaw) * this.speed * dt;
+    const nz = this.z + Math.cos(this.yaw) * this.speed * dt;
+    // Building AABB collision, circle radius ~ half length.
+    const r = this.kind.len * 0.42;
+    let cx = nx, cz = nz, hit = false;
+    for (const c of colliders) {
+      const qx = clamp(cx, c.x - c.hw, c.x + c.hw);
+      const qz = clamp(cz, c.z - c.hd, c.z + c.hd);
+      const dx = cx - qx, dz = cz - qz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < r * r) {
+        const d = Math.sqrt(d2) || 0.001;
+        cx = qx + (dx / d) * r; cz = qz + (dz / d) * r;
+        hit = true;
+      }
+    }
+    if (hit) this.speed *= 0.55;
+    this.x = cx; this.z = cz;
+    // Soft separation from other cars.
+    if (others) {
+      for (const o of others) {
+        if (o === this || o.dead) continue;
+        const dx = this.x - o.x, dz = this.z - o.z;
+        const d2 = dx * dx + dz * dz;
+        const min = 3.4;
+        if (d2 < min * min && d2 > 0.001) {
+          const d = Math.sqrt(d2);
+          const push = (min - d) / 2;
+          this.x += (dx / d) * push; this.z += (dz / d) * push;
+          o.x -= (dx / d) * push; o.z -= (dz / d) * push;
+          this.speed *= 0.92; o.speed *= 0.92;
+        }
+      }
+    }
+    // Keep inside the world.
+    this.x = clamp(this.x, -430, 640);
+    this.z = clamp(this.z, -430, 430);
+    this.group.position.set(this.x, this.airY || 0, this.z);
+    this.group.rotation.y = this.yaw;
+    for (const w of this.wheels) w.rotation.x += this.speed * dt * 2.4;
+    if (this.barL) {
+      const on = Math.floor(performance.now() / 280) % 2 === 0;
+      this.barL.material.color.setHex(on ? 0xff2222 : 0x551111);
+      this.barR.material.color.setHex(on ? 0x111155 : 0x2244ff);
+    }
   }
 
-  remove(scene) { scene.remove(this.group); }
+  damage(amount) {
+    this.hp -= amount;
+    if (this.hp <= 0) { this.hp = 0; this.dead = true; this.smoke = 6; }
+    else if (this.hp < 40) this.smoke = 2;
+  }
+
+  remove() { this.scene.remove(this.group); }
 }

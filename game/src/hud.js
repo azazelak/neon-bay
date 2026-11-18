@@ -1,148 +1,103 @@
-// Neon Bay — HUD: health, cash, rep, clock, wanted stars, objective,
-// ammo, tokens, toast lines, live minimap, and the menu screens.
+// Neon Bay v4 — HUD: DOM overlay (cash, rep, stars, speed, ammo, tokens,
+// objective, clock, toasts) plus a live 2D minimap and the menu screens
+// (start, pause, busted, wasted, story complete).
+export function createHud() {
+  const root = document.getElementById('hud');
+  const el = (id) => document.getElementById(id);
+  const minimap = el('minimap');
+  const mctx = minimap.getContext('2d');
 
-import { CFG } from './config.js';
-
-export class Hud {
-  constructor(doc, city) {
-    this.doc = doc;
-    this.city = city;
-    this.el = {};
-    for (const id of ['health-fill', 'cash', 'rep', 'clock', 'stars', 'tokens', 'objective', 'ammo', 'toast', 'speed', 'minimap']) {
-      this.el[id] = doc.getElementById(id);
-    }
-    this.map = this.el.minimap ? this.el.minimap.getContext('2d') : null;
-    this.toastTimer = 0;
-    this.screens = {};
-    for (const id of ['start-screen', 'pause-screen', 'busted-screen', 'wasted-screen', 'complete-screen']) {
-      this.screens[id] = doc.getElementById(id);
+  function setText(id, text) { const n = el(id); if (n) n.textContent = text; }
+  function setStars(n) {
+    setText('stars', '★'.repeat(n) + '☆'.repeat(Math.max(0, 5 - n)));
+    const s = el('stars');
+    if (s) s.style.color = n >= 3 ? '#ff4444' : '#ffd94a';
+  }
+  function toast(msg) {
+    const t = el('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2600);
+  }
+  function showMenu(name) {
+    for (const m of ['menu-start', 'menu-pause', 'menu-busted', 'menu-wasted', 'menu-complete']) {
+      const n = el(m);
+      if (n) n.style.display = m === 'menu-' + name ? 'flex' : 'none';
     }
   }
+  function hideMenus() { showMenu('none'); }
 
-  showScreen(name) {
-    for (const [id, el] of Object.entries(this.screens)) {
-      if (el) el.style.display = id === name ? 'flex' : 'none';
-    }
-  }
-
-  hideScreens() {
-    for (const el of Object.values(this.screens)) if (el) el.style.display = 'none';
-  }
-
-  toast(text, seconds = 5) {
-    if (!this.el.toast) return;
-    this.el.toast.textContent = text;
-    this.el.toast.style.opacity = '1';
-    this.toastTimer = seconds;
-  }
-
-  update(dt, s) {
-    if (this.toastTimer > 0) {
-      this.toastTimer -= dt;
-      if (this.toastTimer <= 0 && this.el.toast) this.el.toast.style.opacity = '0';
-    }
-    if (this.el['health-fill']) {
-      this.el['health-fill'].style.width = `${Math.max(0, s.health)}%`;
-      this.el['health-fill'].style.background = s.health > 50 ? '#3aff8a' : s.health > 25 ? '#ffd42a' : '#ff2a2a';
-    }
-    if (this.el.cash) this.el.cash.textContent = `$${Math.floor(s.cash).toLocaleString()}`;
-    if (this.el.rep) this.el.rep.textContent = `REP ${s.rep}`;
-    if (this.el.clock) {
-      const h = Math.floor(s.clock) % 24;
-      const m = Math.floor((s.clock % 1) * 60);
-      this.el.clock.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    }
-    if (this.el.stars) {
-      this.el.stars.textContent = '★'.repeat(s.wanted) + '☆'.repeat(5 - s.wanted);
-      this.el.stars.style.color = s.wanted >= 3 ? '#ff2a2a' : '#ffd42a';
-    }
-    if (this.el.tokens) this.el.tokens.textContent = `◆ ${s.tokens} / ${CFG.tokenCount} TOKENS`;
-    if (this.el.objective) this.el.objective.innerHTML = `<b>OBJECTIVE</b><br>${s.objective}`;
-    if (this.el.ammo) {
-      this.el.ammo.textContent = s.hasGun
-        ? (s.reloading ? 'RELOADING…' : `AMMO ${s.ammo}/${CFG.pistolMag}`)
-        : (s.gunUnlocked ? 'PISTOL — press 1 to draw' : '');
-    }
-    if (this.el.speed) this.el.speed.textContent = s.inCar ? `${Math.round(s.speed * 3.6)} km/h` : '';
-    if (this.map) this.drawMinimap(s);
-  }
-
-  drawMinimap(s) {
-    const ctx = this.map;
-    const W = 180;
-    const H = 180;
-    const scale = W / 760; // world -380..380 -> 0..180
-    const toMap = (x, z) => [(x + 380) * scale, (z + 380) * scale];
-    ctx.fillStyle = 'rgba(10, 12, 24, 0.85)';
-    ctx.fillRect(0, 0, W, H);
+  // Minimap: world x -450..650, z -450..450 mapped to 170 px.
+  function drawMinimap(s) {
+    const W = 170, H = 170;
+    mctx.clearRect(0, 0, W, H);
+    mctx.fillStyle = '#101018'; mctx.fillRect(0, 0, W, H);
+    const sx = (x) => ((x + 450) / 1100) * W;
+    const sz = (z) => ((z + 450) / 900) * H;
     // Ocean.
-    ctx.fillStyle = '#1a4a6a';
-    ctx.fillRect(0, (400 + 380) * scale, W, H - (400 + 380) * scale);
-    // Sand.
-    ctx.fillStyle = '#8a6a42';
-    ctx.fillRect(0, (360 + 380) * scale, W, (400 - 360) * scale);
-    // Buildings as dark blocks.
-    ctx.fillStyle = '#3a3f4a';
-    for (const c of this.city.colliders) {
-      const [x, z] = toMap(c.minX, c.minZ);
-      ctx.fillRect(x, z, (c.maxX - c.minX) * scale, (c.maxZ - c.minZ) * scale);
-    }
+    mctx.fillStyle = '#1d4f6e'; mctx.fillRect(sx(470), 0, W - sx(470), H);
+    mctx.fillStyle = '#d9b380'; mctx.fillRect(sx(432), 0, sx(470) - sx(432), H);
     // Roads.
-    ctx.strokeStyle = '#5a5a66';
-    ctx.lineWidth = 2;
-    for (let a = -320; a <= 320; a += 80) {
-      const [x1, y1] = toMap(a, -340);
-      const [x2, y2] = toMap(a, 340);
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-      const [x3, y3] = toMap(-340, a);
-      const [x4, y4] = toMap(340, a);
-      ctx.beginPath(); ctx.moveTo(x3, y3); ctx.lineTo(x4, y4); ctx.stroke();
+    mctx.strokeStyle = '#3d4149'; mctx.lineWidth = 3;
+    for (let k = -4; k <= 4; k++) {
+      mctx.beginPath(); mctx.moveTo(sx(k * 96), 0); mctx.lineTo(sx(k * 96), H); mctx.stroke();
+      mctx.beginPath(); mctx.moveTo(0, sz(k * 96)); mctx.lineTo(W, sz(k * 96)); mctx.stroke();
     }
+    // Blocks.
+    mctx.fillStyle = '#2c2f38';
+    for (let i = -4; i < 4; i++) for (let j = -4; j < 4; j++) {
+      mctx.fillRect(sx(i * 96 + 48) - 4, sz(j * 96 + 48) - 4, 8, 8);
+    }
+    // Pier + wheel.
+    mctx.fillStyle = '#7a5a38'; mctx.fillRect(sx(440), sz(-12), sx(570) - sx(440), sz(12) - sz(-12));
+    mctx.fillStyle = '#ff2e88';
+    mctx.beginPath(); mctx.arc(sx(545), sz(0), 4, 0, Math.PI * 2); mctx.fill();
     // Tokens.
-    ctx.fillStyle = '#2ad4ff';
-    for (const t of s.tokenList || []) {
-      if (t.taken) continue;
-      const [x, y] = toMap(t.x, t.z);
-      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    mctx.fillStyle = '#ff2e88';
+    for (const tk of s.tokens || []) {
+      if (tk.taken) continue;
+      mctx.fillRect(sx(tk.x) - 1.5, sz(tk.z) - 1.5, 3, 3);
     }
-    // Mission beacon.
-    if (s.beacon) {
-      const [x, y] = toMap(s.beacon.x, s.beacon.z);
-      ctx.fillStyle = '#ffd42a';
-      ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
-      ctx.fill();
+    // Fare marker.
+    if (s.fare) {
+      mctx.fillStyle = '#39ff88';
+      mctx.beginPath(); mctx.arc(sx(s.fare.x), sz(s.fare.z), 4, 0, Math.PI * 2); mctx.fill();
     }
-    // Traffic.
-    ctx.fillStyle = '#9a9aa8';
-    for (const c of s.trafficCars || []) {
-      const [x, y] = toMap(c.x, c.z);
-      ctx.fillRect(x - 1, y - 1, 2, 2);
+    // Mission target: pulsing yellow ring.
+    if (s.target) {
+      const p = 3 + Math.sin(performance.now() / 200) * 1.5;
+      mctx.strokeStyle = '#ffd94a'; mctx.lineWidth = 2;
+      mctx.beginPath(); mctx.arc(sx(s.target.x), sz(s.target.z), p + 3, 0, Math.PI * 2); mctx.stroke();
     }
-    // Cruisers.
-    ctx.fillStyle = '#ff2a2a';
-    for (const c of s.cruisers || []) {
-      const [x, y] = toMap(c.x, c.z);
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
+    // Police.
+    mctx.fillStyle = '#ff3333';
+    for (const c of s.police || []) {
+      mctx.beginPath(); mctx.arc(sx(c.x), sz(c.z), 2.5, 0, Math.PI * 2); mctx.fill();
     }
     // Player arrow.
-    const [px, py] = toMap(s.playerX, s.playerZ);
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(-s.playerHeading);
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(0, -6);
-    ctx.lineTo(4, 5);
-    ctx.lineTo(-4, 5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-    // North marker.
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 11px Arial';
-    ctx.fillText('N', W - 12, 12);
+    const px = sx(s.x), pz = sz(s.z);
+    mctx.save();
+    mctx.translate(px, pz); mctx.rotate(Math.PI - s.yaw);
+    mctx.fillStyle = '#ffffff';
+    mctx.beginPath(); mctx.moveTo(0, -6); mctx.lineTo(4.5, 5); mctx.lineTo(-4.5, 5); mctx.closePath(); mctx.fill();
+    mctx.restore();
   }
+
+  return {
+    setCash: (v) => setText('cash', '$' + v.toLocaleString('en-US')),
+    setRep: (v) => setText('rep', 'REP ' + v),
+    setTokens: (n, total) => setText('tokens', '◆ ' + n + ' / ' + total + ' TOKENS'),
+    setSpeed: (kmh) => setText('speed', kmh > 0 ? Math.round(kmh) + ' km/h' : ''),
+    setAmmo: (a, hasGun) => setText('ammo', hasGun ? 'AMMO ' + a + '/12' : ''),
+    setClock: (t) => {
+      const mins = Math.floor(t / 60) % 24;
+      const hh = String(17 + Math.floor(t / 3600)).padStart(2, '0');
+      const mm = String(Math.floor(t / 60) % 60).padStart(2, '0');
+      setText('clock', hh + ':' + mm);
+    },
+    setObjective: (t) => setText('objective-text', t),
+    setStars, toast, showMenu, hideMenus, drawMinimap,
+  };
 }
