@@ -1,86 +1,141 @@
-// Neon Bay — tuning and world constants. One place for every number the
-// systems share, so a tweak here retunes the whole game.
-export const CFG = {
+// Neon Bay — every tunable number in one place. The city is a 9x9 grid of
+// avenues on a 74 m pitch; intersections sit at multiples of 74 from -296
+// to 296, the shore and the ocean lie west of x = -333.
+export const CONFIG = {
   seed: 1337,
-  // City grid: 9 x 9 blocks, pitch 52 (40 block + 12 road).
-  blocks: 9,
-  blockPitch: 52,
-  blockSize: 40,
-  roadWidth: 12,
-  worldHalf: 260, // playable bounds (beach + ocean beyond +z)
-  beachZ: 236, // sand starts here, ocean plane beyond worldHalf
-  // Sun-soaked dusk: warm low sun, pink-orange sky, neon signs.
-  sunColor: 0xffb36b,
-  sunIntensity: 2.6,
-  hemiSky: 0xffd9a0,
-  hemiGround: 0x2a1e3f,
-  hemiIntensity: 1.25,
-  fogColor: 0x2c1e3a,
-  fogNear: 120,
-  fogFar: 520,
-  // Player on foot.
-  walkSpeed: 6,
-  sprintSpeed: 10,
-  playerRadius: 0.6,
+  pitch: 74,
+  gridHalf: 4, // intersections at -4..4 * pitch
+  roadHalf: 7, // half the drivable width of an avenue
+  cityHalf: 333, // playable edge, east/north/south
+  shoreX: -333, // ocean starts west of here
+  beachHalf: 296, // westernmost avenue; beach strip between shore and it
+
+  playerWalk: 6,
+  playerSprint: 9.5,
   playerHealth: 100,
-  // Cars (arcade physics).
-  carAccel: 16,
-  carBrake: 30,
-  carMaxSpeed: 34, // sports 42
-  carReverseMax: 10,
-  carTurn: 1.9,
-  carRadius: 1.6,
-  trafficCount: 20,
-  trafficSpeed: 9,
-  pedCount: 36,
-  pedSpeed: 1.6,
-  // Neon tokens: collectibles that pay cash (side activity).
+
+  // Arcade car kinds: top speed, acceleration, braking, paint jobs.
+  carKinds: {
+    sedan: { maxSpeed: 34, accel: 15, brake: 26, colors: [0x3a6fd8, 0xc0392b, 0xd8d8d8, 0x222226] },
+    taxi: { maxSpeed: 30, accel: 13, brake: 24, colors: [0xf7b500] },
+    van: { maxSpeed: 28, accel: 11, brake: 22, colors: [0x8a8f98, 0x5a7d5a] },
+    muscle: { maxSpeed: 36, accel: 17, brake: 26, colors: [0xb02020, 0x1a1a2e] },
+    pickup: { maxSpeed: 32, accel: 14, brake: 24, colors: [0x2e6b4f, 0x7a5a2e] },
+    sports: { maxSpeed: 41, accel: 20, brake: 30, colors: [0xff6a00] },
+    police: { maxSpeed: 44, accel: 18, brake: 30, colors: [0x101418] },
+  },
+
+  trafficCars: 20,
+  peds: 36,
+  parkedCars: 16,
   tokenCount: 12,
-  tokenReward: 50,
-  // Police pursuit: cruisers must be able to catch a fleeing player.
-  // Speed cap per wanted level: 26 + 3.6 * level (L1 29.6 … L5 44).
-  policeBaseSpeed: 26,
-  policeSpeedPerStar: 3.6,
-  policeTopSpeed: 44,
-  roadblockMinStars: 3,
-  // Wanted system.
-  heatPerStar: 20,
-  maxWanted: 5,
-  heatStealCar: 20, // one full star: stealing a car always brings the cops
-  heatHitPed: 25,
-  heatShoot: 20,
-  heatHitCop: 30,
-  heatPunch: 8,
-  heatDecay: 2.0, // per second while unseen
-  bustTime: 1.2, // seconds a cop must hold the player to bust them
-  // Combat.
-  punchDamage: 15,
-  punchRange: 2.2,
-  gunDamage: 34,
-  gunRange: 45,
-  gunMagazine: 12,
-  // Missions.
-  missionReward: [500, 1200, 2000, 8000],
-  // HUD / minimap.
-  minimapSize: 180,
-  // Camera.
-  camDistFoot: 7,
-  camDistCar: 10,
-  camHeightFoot: 3.2,
-  camHeightCar: 4.2,
+  tokenValue: 50,
+
+  // Wanted level: heat thresholds that buy each star.
+  starAt: [1, 25, 45, 70, 90],
+  heatSteal: 15,
+  heatKill: 20,
+  heatDecay: 1.2, // per second, after 8 s without a crime
+  heatCleanDelay: 8,
+  // Cruiser top speed grows with the wanted level, 29.6 at 1 star to 44 at 5.
+  policeCap: (stars) => Math.min(44, 26 + stars * 3.6),
+  policeRamRange: 25,
+  policePitStars: 3,
+  policeRoadblockStars: 3,
+  roadblockCooldown: 22,
+  roadblockAhead: 45,
+  arrestRange: 2,
+  arrestSeconds: 1.5,
+
+  rewards: [500, 1200, 2000, 8000],
+  missionDelay: 1.5, // seconds between one mission ending and the next starting
+  holdSeconds: 8,
+  holdRadius: 9,
+
+  magSize: 12,
+  cruiserHitsToKill: 3,
+
+  // Palette for the dusk look: warm sun, purple sky, neon accents.
+  palette: {
+    skyTop: 0x1b2340,
+    skyMid: 0x7a4a8a,
+    horizon: 0xff7e3d,
+    sun: 0xffd27a,
+    fog: 0x2a1a33,
+    road: 0x2e2a38,
+    sidewalk: 0x4a4552,
+    sand: 0xc2a878,
+    ocean: 0x144a6e,
+    grass: 0x2e4a2e,
+  },
+
+  // Original names only — nothing from any commercial game.
+  signs: [
+    { text: 'NEON BAY', color: '#ff2e88' },
+    { text: 'CASINO LUNA', color: '#ffd23e' },
+    { text: 'MARINA', color: '#2ee6ff' },
+    { text: 'HOTEL CORAL', color: '#ff7a3c' },
+    { text: 'TACOS EL CAMINO', color: '#7dff5a' },
+    { text: 'CLUB VOLT', color: '#b45aff' },
+    { text: 'PALM COURT', color: '#ff5a5a' },
+    { text: 'BAY BURGER', color: '#ffb13c' },
+    { text: 'DISCO SOL', color: '#3cffb1' },
+    { text: 'PIER 9', color: '#5aa8ff' },
+  ],
 };
 
-// Neon palette for the city: building glass, signs, cars, UI accents.
-export const PALETTE = {
-  asphalt: '#3d3d4d',
-  sidewalk: '#5a5a68',
-  blockTop: '#43435a',
-  sand: '#c9a86a',
-  ocean: '#1d4e6b',
-  windowLit: ['#ffd27a', '#9fd8ff', '#ff9d6b', '#c9f2ff', '#ffb3d9'],
-  windowDark: '#1c2030',
-  neon: ['#ff2d78', '#00e5ff', '#ffe600', '#7cff00', '#ff6a00', '#b967ff'],
-  carColors: [0xd23b3b, 0x2b6fd6, 0xe8b93a, 0x37c978, 0xe8e8e8, 0x222226, 0x8a4fd0, 0xff7a1a],
-  policeWhite: 0xf2f2f2,
-  policeBlack: 0x14141a,
-};
+// Avenue coordinate for grid index i (-gridHalf..gridHalf).
+export function avenue(i) {
+  return i * CONFIG.pitch;
+}
+
+// Snap a world position to its nearest intersection.
+export function nearestIntersection(x, z) {
+  const c = (v) => {
+    const i = Math.max(-CONFIG.gridHalf, Math.min(CONFIG.gridHalf, Math.round(v / CONFIG.pitch)));
+    return i * CONFIG.pitch;
+  };
+  return { x: c(x), z: c(z) };
+}
+
+// True when (x, z) lies on a drivable avenue (within the road plus curb).
+export function onRoad(x, z) {
+  const near = (v) => {
+    const r = Math.abs(v / CONFIG.pitch - Math.round(v / CONFIG.pitch)) * CONFIG.pitch;
+    return r <= CONFIG.roadHalf + 2;
+  };
+  return near(x) || near(z);
+}
+
+// Push a circle (x, z, radius r) out of every building AABB it overlaps.
+// Mutates and returns the position object; also reports whether it hit.
+export function resolveBuildings(pos, r, colliders) {
+  let hit = false;
+  for (let i = 0; i < colliders.length; i++) {
+    const b = colliders[i];
+    const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
+    const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
+    const dx = pos.x - cx;
+    const dz = pos.z - cz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= r * r) continue;
+    hit = true;
+    if (d2 > 1e-6) {
+      const d = Math.sqrt(d2);
+      pos.x = cx + (dx / d) * r;
+      pos.z = cz + (dz / d) * r;
+    } else {
+      // Centre inside the box: shove out along the smallest penetration.
+      const pl = pos.x - b.minX;
+      const pr = b.maxX - pos.x;
+      const pt = pos.z - b.minZ;
+      const pb = b.maxZ - pos.z;
+      const m = Math.min(pl, pr, pt, pb);
+      if (m === pl) pos.x = b.minX - r;
+      else if (m === pr) pos.x = b.maxX + r;
+      else if (m === pt) pos.z = b.minZ - r;
+      else pos.z = b.maxZ + r;
+    }
+  }
+  return hit;
+}

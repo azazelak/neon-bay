@@ -1,155 +1,130 @@
-// Neon Bay — combat. Fists up close, a pistol once Mara trusts you with
-// one. Punches knock people down; bullets are hitscan against the nearest
-// person or car in the aim cone. Every violent act feeds the wanted system
-// and scares the pedestrians nearby.
-import * as THREE from 'three';
-import { CFG } from './config.js';
+// Combat: fists up close, a hitscan pistol once Mara hands one over.
+// Three hits disable a cruiser — the pistol is how a sedan driver survives
+// a 5-star chase. Shots are resolved against the camera's aim, so what the
+// player sees is what they hit.
+import { CONFIG } from './config.js';
 
 export class Combat {
-  constructor(sound, effects, wanted, traffic, police) {
-    this.sound = sound;
+  constructor(scene, effects, audio) {
+    this.scene = scene;
     this.effects = effects;
-    this.wanted = wanted;
-    this.traffic = traffic;
-    this.police = police;
+    this.audio = audio;
     this.hasGun = false;
     this.ammo = 0;
-    this._cooldown = 0;
-    this._reloadT = 0;
-    this._punchT = 0;
+    this.reloadT = 0;
+  }
+
+  reset() {
+    this.hasGun = false;
+    this.ammo = 0;
+    this.reloadT = 0;
   }
 
   giveGun() {
     this.hasGun = true;
-    this.ammo = CFG.gunMagazine;
+    this.ammo = CONFIG.magSize;
   }
 
-  update(dt, input, player, camForward, camPos) {
-    this._cooldown -= dt;
-    this._punchT -= dt;
-    if (this._reloadT > 0) {
-      this._reloadT -= dt;
-      if (this._reloadT <= 0) this.ammo = CFG.gunMagazine;
+  update(dt, game) {
+    if (this.reloadT > 0) {
+      this.reloadT -= dt;
+      if (this.reloadT <= 0) this.ammo = CONFIG.magSize;
       return;
     }
-    // Punch: F, short arc in front of the player.
-    if (input.pressed('KeyF') && this._punchT <= 0 && !player.inCar) {
-      this._punchT = 0.45;
-      this.sound.punch();
-      this._melee(player, camForward);
+    const input = game.input;
+    if (input.pressed('KeyR') && this.hasGun && this.ammo < CONFIG.magSize) {
+      this.reloadT = 1.0;
+      return;
     }
-    // Shoot: click or G, only with the gun out and the player on foot.
-    const wantShoot = (input.clicked || input.pressed('KeyG')) && this.hasGun && !player.inCar;
-    if (wantShoot && this._cooldown <= 0) {
-      if (this.ammo <= 0) {
-        this._reloadT = 1.2;
-        return;
-      }
-      this._cooldown = 0.22;
-      this.ammo -= 1;
-      this.sound.gunshot();
-      this._shoot(player, camForward, camPos);
-    }
+    if (input.pressed('KeyF') && !game.player.inCar) this.punch(game);
+    if (input.clicked && this.hasGun) this.shoot(game);
   }
 
-  _aimDir(player, camForward) {
-    // Aim from the camera's forward on the ground plane.
-    return { x: camForward.x, z: camForward.z };
-  }
-
-  _melee(player, camForward) {
-    const dir = this._aimDir(player, camForward);
-    const hit = (tx, tz, range) => {
-      const dx = tx - player.x;
-      const dz = tz - player.z;
-      const d = Math.hypot(dx, dz);
-      if (d > range) return false;
-      const dot = (dx * dir.x + dz * dir.z) / (d || 1);
-      return dot > 0.35;
-    };
-    for (const ped of this.traffic.peds) {
-      if (ped.dead) continue;
-      if (hit(ped.x, ped.z, CFG.punchRange)) {
-        this._hurtPed(ped, CFG.punchDamage, dir);
-        return;
+  // The shot goes where the camera looks; the nearest cruiser or pedestrian
+  // near that line takes the hit.
+  shoot(game) {
+    if (this.ammo <= 0) {
+      this.reloadT = 1.0;
+      this.audio.blip(180, 0.05, 'square', 0.05);
+      return;
+    }
+    this.ammo--;
+    const rig = game.rig;
+    const f = rig.forwardXZ();
+    const px = game.player.x;
+    const pz = game.player.z;
+    const from = { x: px + f.x * 1.2, y: 1.5, z: pz + f.z * 1.2 };
+    const to = { x: px + f.x * 70, y: 1.5, z: pz + f.z * 70 };
+    let hit = null;
+    let hitD = 70;
+    for (const e of game.police.cars) {
+      if (e.car.disabled) continue;
+      const d = this.aimDistance(px, pz, f, e.car.x, e.car.z);
+      if (d && d.dist < hitD && d.lateral < 4) { hitD = d.dist; hit = { kind: 'cruiser', entry: e, x: e.car.x, z: e.car.z }; }
+    }
+    for (const p of game.traffic.peds) {
+      if (p.state !== 'walk') continue;
+      const d = this.aimDistance(px, pz, f, p.x, p.z);
+      if (d && d.dist < hitD && d.lateral < 2.5) { hitD = d.dist; hit = { kind: 'ped', ped: p, x: p.x, z: p.z }; }
+    }
+    if (hit) {
+      to.x = hit.x;
+      to.y = 1.2;
+      to.z = hit.z;
+      this.effects.burst(hit.x, 1.2, hit.z, 0xff5040, 12, 5, 3, 0.6);
+      if (hit.kind === 'cruiser') {
+        hit.entry.car.hp--;
+        if (hit.entry.car.hp <= 0) {
+          hit.entry.car.disabled = true;
+          game.police.addHeat(5);
+          game.hud.toast('Cruiser disabled');
+        }
+      } else {
+        game.traffic.fallPed(hit.ped);
+        game.police.addHeat(CONFIG.heatKill);
       }
     }
-    for (const cop of this.police.cops) {
-      if (cop.dead) continue;
-      if (hit(cop.x, cop.z, CFG.punchRange)) {
-        this._hurtCop(cop, CFG.punchDamage);
-        return;
-      }
-    }
+    this.effects.tracer(from, to);
+    this.effects.burst(from.x, from.y, from.z, 0xffe9a0, 4, 2, 1, 0.15, 0);
+    this.audio.shot();
   }
 
-  _shoot(player, camForward, camPos) {
-    const dir = this._aimDir(player, camForward);
-    const ox = player.x;
-    const oz = player.z;
+  // Distance along the aim line and lateral offset of a point from it.
+  aimDistance(px, pz, f, x, z) {
+    const dx = x - px;
+    const dz = z - pz;
+    const along = dx * f.x + dz * f.z;
+    if (along < 2 || along > 70) return null;
+    const lateral = Math.abs(dx * (-f.z) + dz * f.x);
+    return { dist: along, lateral };
+  }
+
+  punch(game) {
+    const player = game.player;
+    const f = game.rig.forwardXZ();
     let best = null;
-    let bestD = CFG.gunRange;
-    let bestKind = null;
-    const consider = (tx, tz, kind, ref) => {
-      const dx = tx - ox;
-      const dz = tz - oz;
-      const d = Math.hypot(dx, dz);
-      if (d > bestD) return;
-      const dot = (dx * dir.x + dz * dir.z) / (d || 1);
-      if (dot < 0.93) return; // ~21 degree cone
-      bestD = d;
-      best = ref;
-      bestKind = kind;
-    };
-    for (const ped of this.traffic.peds) if (!ped.dead) consider(ped.x, ped.z, 'ped', ped);
-    for (const cop of this.police.cops) if (!cop.dead) consider(cop.x, cop.z, 'cop', cop);
-    for (const car of [...this.traffic.allCars(), ...this.police.cars]) {
-      consider(car.x, car.z, 'car', car);
+    let bestD = 2.6;
+    for (const p of game.traffic.peds) {
+      if (p.state !== 'walk') continue;
+      const d = Math.hypot(p.x - player.x, p.z - player.z);
+      if (d < bestD) { bestD = d; best = { kind: 'ped', ped: p }; }
     }
-    const muzzle = { x: ox + dir.x * 1.2, y: 1.4, z: oz + dir.z * 1.2 };
-    const end = { x: ox + dir.x * bestD, y: 1.2, z: oz + dir.z * bestD };
-    this.effects.tracer(muzzle, end);
-    this.effects.burst(end, 0xffd27a, 6);
+    for (const cop of game.police.footCops) {
+      if (cop.downT > 0) continue;
+      const d = Math.hypot(cop.x - player.x, cop.z - player.z);
+      if (d < bestD) { bestD = d; best = { kind: 'cop', cop }; }
+    }
+    this.audio.punch();
+    this.effects.burst(player.x + f.x * 1.4, 1.2, player.z + f.z * 1.4, 0xffffff, 5, 2, 1, 0.3, 0);
     if (!best) return;
-    if (bestKind === 'ped') this._hurtPed(best, CFG.gunDamage, dir);
-    else if (bestKind === 'cop') this._hurtCop(best, CFG.gunDamage);
-    else if (bestKind === 'car') {
-      best.speed *= 0.6;
-      this.effects.burst({ x: best.x, y: 1, z: best.z }, 0x888888, 8);
-    }
-    this.wanted.addHeat(CFG.heatShoot);
-    this.traffic.scare(ox, oz, 34);
-  }
-
-  _hurtPed(ped, dmg, dir) {
-    ped.health -= dmg;
-    this.wanted.addHeat(ped.health <= 0 ? CFG.heatHitPed : CFG.heatPunch);
-    this.traffic.scare(ped.x, ped.z, 30);
-    if (ped.health <= 0) {
-      ped.dead = true;
-      ped.fallT = 0;
-      ped.mesh.rotation.x = -Math.PI / 2;
-      ped.mesh.position.y = 0.4;
-      this.effects.burst({ x: ped.x, y: 1, z: ped.z }, 0xff4444, 10);
+    if (best.kind === 'ped') {
+      game.traffic.fallPed(best.ped);
+      game.police.addHeat(5);
     } else {
-      // Shove them away from the punch.
-      ped.x += dir.x * 1.2;
-      ped.z += dir.z * 1.2;
-      ped.state = 'flee';
-      ped.fleeFrom = { x: ped.x - dir.x * 5, z: ped.z - dir.z * 5 };
-      ped.fleeT = 3;
-    }
-  }
-
-  _hurtCop(cop, dmg) {
-    cop.health -= dmg;
-    this.wanted.addHeat(CFG.heatHitCop);
-    if (cop.health <= 0) {
-      cop.dead = true;
-      cop.mesh.rotation.x = -Math.PI / 2;
-      cop.mesh.position.y = 0.4;
-      this.effects.burst({ x: cop.x, y: 1, z: cop.z }, 0xff4444, 10);
-      this.police.removeCop(cop);
+      best.cop.downT = 3;
+      best.cop.group.rotation.x = -Math.PI / 2;
+      setTimeout(() => { best.cop.group.rotation.x = 0; }, 3000);
+      game.police.addHeat(10);
     }
   }
 }

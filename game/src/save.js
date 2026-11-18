@@ -1,45 +1,47 @@
-// Neon Bay — save and load. One localStorage slot: cash, reputation,
-// missions finished, where Rico stands and what time it is. Nothing leaves
-// the browser.
-const KEY = 'neonbay-save-v1';
+// Save / load through localStorage. Only progression is kept — cash,
+// reputation, missions finished, tokens taken, unlocks — the world itself
+// (traffic, police, positions) always starts fresh.
+const KEY = 'neonbay-save-v3';
 
-export function saveGame(state) {
-  try {
-    const data = {
-      cash: state.cash,
-      rep: state.rep,
-      missionsDone: state.missionsDone,
-      playerX: state.player.x,
-      playerZ: state.player.z,
-      timeMin: state.timeMin,
-      hasGun: state.hasGun,
-      savedAt: Date.now(),
-    };
-    window.localStorage.setItem(KEY, JSON.stringify(data));
-    return true;
-  } catch (e) {
-    return false;
+export class SaveSys {
+  exists() {
+    try {
+      return !!localStorage.getItem(KEY);
+    } catch {
+      return false;
+    }
   }
-}
 
-export function loadGame() {
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data.cash !== 'number' || typeof data.missionsDone !== 'number') return null;
-    return data;
-  } catch (e) {
-    return null;
+  save(game) {
+    try {
+      const data = {
+        cash: game.cash,
+        rep: game.rep,
+        missionsDone: game.missions.missionsDone,
+        tokens: game.tokens.list.filter((t) => t.taken).map((t) => t.id),
+        hasGun: game.combat.hasGun,
+        sportsUnlocked: game.sportsUnlocked,
+      };
+      localStorage.setItem(KEY, JSON.stringify(data));
+    } catch {
+      // Storage full or blocked: the game simply does not persist.
+    }
   }
-}
 
-export function hasSave() {
-  return loadGame() !== null;
-}
+  load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
 
-export function clearSave() {
-  try {
-    window.localStorage.removeItem(KEY);
-  } catch (e) {}
+  clear() {
+    try {
+      localStorage.removeItem(KEY);
+    } catch {
+      // ignore
+    }
+  }
 }

@@ -1,61 +1,57 @@
-// Neon Bay — neon tokens, the side activity. Twelve glowing tokens sit at
-// fixed spots around the city (rooftop corners, the pier, the promenade,
-// the marina). Drive or walk through one and it pays cash: a reason to
-// explore every district between jobs.
+// Twelve neon tokens hidden around the city, $50 each. A spinning cyan
+// torus that floats above the ground; driving or walking through one
+// collects it. Collected tokens persist in the save.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { makeRng } from './rng.js';
+import { CONFIG } from './config.js';
 
-export class TokenManager {
-  constructor(scene, city, seed = CFG.seed + 21) {
+const SPOTS = [
+  [74, 74], [-74, 148], [222, -74], [-222, 74],
+  [148, -222], [-148, -222], [0, 296], [296, 148],
+  [-296, -148], [74, -296], [-222, 296], [222, 296],
+];
+
+export class Tokens {
+  constructor(scene) {
     this.scene = scene;
-    this.tokens = []; // { mesh, ring, x, z, taken }
+    this.list = [];
     this.collected = 0;
-    this.total = CFG.tokenCount;
-    const rng = makeRng(seed);
-    const lines = city.roadLines;
-    const spots = [];
-    // Tokens hug the roads and the sights: corners, the beach, the pier.
-    while (spots.length < CFG.tokenCount) {
-      const line = rng.pick(lines);
-      const along = rng.range(-CFG.worldHalf + 24, CFG.worldHalf - 24);
-      const x = rng.chance(0.5) ? line + rng.pick([-9, 9]) : along;
-      const z = rng.chance(0.5) ? along : line + rng.pick([-9, 9]);
-      if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 40)) continue;
-      spots.push({ x, z });
-    }
-    // One token always waits at the end of the pier.
-    spots[0] = { x: 20, z: CFG.worldHalf + 34 };
-    const geo = new THREE.OctahedronGeometry(0.9);
-    const ringGeo = new THREE.TorusGeometry(1.5, 0.08, 8, 24);
-    for (const s of spots) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffe600 });
+    const geo = new THREE.TorusGeometry(1.1, 0.28, 10, 20);
+    for (let i = 0; i < CONFIG.tokenCount; i++) {
+      const [x, z] = SPOTS[i % SPOTS.length];
+      const mat = new THREE.MeshBasicMaterial({ color: 0x2ee6ff });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(s.x, 1.6, s.z);
+      mesh.position.set(x, 1.6, z);
       scene.add(mesh);
-      const ring = new THREE.Mesh(
-        ringGeo,
-        new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.7 }),
-      );
-      ring.rotation.x = Math.PI / 2;
-      ring.position.set(s.x, 0.3, s.z);
-      scene.add(ring);
-      this.tokens.push({ mesh, ring, x: s.x, z: s.z, taken: false, phase: rng.range(0, 6) });
+      this.list.push({ id: i, x, z, taken: false, mesh, phase: i * 0.7 });
     }
   }
 
-  update(dt, time, player, onCollect) {
-    for (const t of this.tokens) {
+  reset(takenIds = []) {
+    this.collected = 0;
+    for (const t of this.list) {
+      t.taken = takenIds.includes(t.id);
+      t.mesh.visible = !t.taken;
+      if (t.taken) this.collected++;
+    }
+  }
+
+  update(dt, game) {
+    const p = game.player;
+    for (const t of this.list) {
       if (t.taken) continue;
-      t.mesh.rotation.y += dt * 2.2;
-      t.mesh.position.y = 1.6 + Math.sin(time * 2 + t.phase) * 0.35;
-      const d = Math.hypot(player.x - t.x, player.z - t.z);
-      if (d < 2.4) {
+      t.mesh.rotation.y += dt * 1.8;
+      t.mesh.position.y = 1.6 + Math.sin(game.time * 2 + t.phase) * 0.25;
+      const car = p.inCar;
+      const dx = (car ? car.x : p.x) - t.x;
+      const dz = (car ? car.z : p.z) - t.z;
+      if (Math.hypot(dx, dz) < 3.5) {
         t.taken = true;
-        this.scene.remove(t.mesh);
-        this.scene.remove(t.ring);
+        t.mesh.visible = false;
         this.collected++;
-        onCollect(CFG.tokenReward);
+        game.cash += CONFIG.tokenValue;
+        game.audio.pickup();
+        game.effects.burst(t.x, 1.6, t.z, 0x2ee6ff, 14, 4, 3, 0.7);
+        game.hud.toast(`Neon token +$${CONFIG.tokenValue}  (${this.collected} / ${CONFIG.tokenCount})`);
       }
     }
   }
