@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -6,94 +6,80 @@
 <title>Neon Bay — an open-world crime game</title>
 <link rel="icon" href="data:,">
 <style>
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #14101c; font-family: Arial, Helvetica, sans-serif; }
-  #game-canvas { display: block; width: 100%; height: 100%; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1420; font-family: Arial, sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
-  .panel { position: absolute; background: rgba(10, 12, 24, 0.62); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; padding: 10px 14px; }
-  #stats { top: 14px; left: 14px; min-width: 210px; }
-  #health-bar { width: 180px; height: 10px; background: rgba(255,255,255,0.18); border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
-  #health-fill { height: 100%; width: 100%; background: #3aff8a; }
-  #cash { font-size: 26px; font-weight: bold; color: #3aff8a; }
-  #rep { font-size: 13px; color: #ffd42a; margin-top: 2px; }
-  #clock { font-size: 13px; color: #c8c8d8; margin-top: 2px; }
-  #wanted { top: 14px; right: 14px; text-align: right; }
-  #stars { font-size: 30px; letter-spacing: 4px; color: #ffd42a; text-shadow: 0 0 12px rgba(255, 42, 42, 0.8); }
-  #tokens { font-size: 13px; color: #2ad4ff; margin-top: 4px; }
-  #ammo { font-size: 13px; color: #ffd42a; margin-top: 4px; }
-  #objective { bottom: 14px; left: 14px; max-width: 520px; font-size: 16px; line-height: 1.4; }
-  #objective b { color: #ffd42a; }
-  #speed { bottom: 14px; right: 210px; font-size: 20px; font-weight: bold; }
-  #minimap { position: absolute; bottom: 14px; right: 14px; width: 180px; height: 180px; border: 2px solid rgba(255,255,255,0.25); border-radius: 8px; background: rgba(10,12,24,0.8); }
-  #toast { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); background: rgba(10,12,24,0.75); border: 1px solid rgba(255,212,42,0.5); border-radius: 8px; padding: 10px 18px; font-size: 15px; max-width: 640px; text-align: center; transition: opacity 0.4s; }
-  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; background: rgba(8, 6, 18, 0.72); color: #fff; text-align: center; z-index: 10; }
-  .screen h1 { font-size: 64px; margin: 0; color: #2ad4ff; text-shadow: 0 0 24px #ff2a7a, 0 0 60px #ff2a7a; letter-spacing: 6px; }
-  .screen h2 { font-size: 34px; margin: 0 0 10px; color: #ffd42a; letter-spacing: 3px; }
-  .screen p { font-size: 16px; line-height: 1.6; max-width: 560px; color: #d8d8e8; }
-  .screen button { pointer-events: auto; margin-top: 18px; padding: 14px 34px; font-size: 18px; font-weight: bold; color: #14101c; background: #ffd42a; border: none; border-radius: 8px; cursor: pointer; }
-  .screen button:hover { background: #ffe86a; }
-  .keys { font-size: 13px; color: #9a9ab0; margin-top: 22px; line-height: 1.8; }
+  .panel { position: absolute; text-shadow: 0 2px 4px rgba(0,0,0,.8); }
+  #topleft { top: 14px; left: 16px; font-size: 20px; font-weight: bold; line-height: 1.5; }
+  #topleft #cash { color: #7dff9a; }
+  #topright { top: 14px; right: 16px; text-align: right; font-size: 20px; font-weight: bold; line-height: 1.5; }
+  #stars { color: #ffd94a; letter-spacing: 2px; }
+  #objective { bottom: 190px; left: 50%; transform: translateX(-50%); background: rgba(10,10,18,.72);
+    padding: 8px 18px; border-left: 4px solid #ffd94a; font-size: 17px; white-space: nowrap; }
+  #objective b { color: #ffd94a; }
+  #toast { bottom: 150px; left: 50%; transform: translateX(-50%); background: rgba(10,10,18,.8);
+    padding: 7px 16px; font-size: 15px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+  #minimap { position: absolute; left: 16px; bottom: 16px; width: 170px; height: 170px;
+    border: 2px solid rgba(255,255,255,.55); border-radius: 50%; background: #101018; }
+  .menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; background: rgba(12,8,20,.78); text-align: center; pointer-events: auto; }
+  .menu h1 { font-size: 64px; margin: 0; color: #ff2e88; text-shadow: 0 0 24px #ff2e88, 0 4px 0 #7a1040; letter-spacing: 4px; }
+  .menu h2 { font-size: 26px; margin: 8px 0 4px; color: #ffd94a; }
+  .menu p { font-size: 16px; max-width: 560px; line-height: 1.55; color: #eee; }
+  .menu button { pointer-events: auto; margin-top: 18px; padding: 14px 42px; font-size: 20px; font-weight: bold;
+    color: #111; background: #ffd94a; border: none; cursor: pointer; letter-spacing: 1px; }
+  .menu button:hover { background: #ffe27a; }
+  .menu .keys { font-size: 14px; color: #bbb; margin-top: 16px; line-height: 1.7; }
+  .menu .keys b { color: #fff; }
+  #menu-pause, #menu-busted, #menu-wasted, #menu-complete { display: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 </style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
 </script>
 </head>
 <body>
-<canvas id="game-canvas"></canvas>
+<canvas id="game" aria-label="Neon Bay: an open-world crime game in a neon coastal city"></canvas>
 <div id="hud">
-  <div id="stats" class="panel">
-    <div id="health-bar"><div id="health-fill"></div></div>
-    <div id="cash">$0</div>
-    <div id="rep">REP 0</div>
-    <div id="clock">18:36</div>
+  <div class="panel" id="topleft"><span id="cash">$0</span><br><span id="rep">REP 0</span><br><span id="tokens">◆ 0 / 20 TOKENS</span><br><span id="clock">17:00</span></div>
+  <div class="panel" id="topright"><span id="stars">☆☆☆☆☆</span><br><span id="speed"></span><br><span id="ammo"></span></div>
+  <div class="panel" id="objective"><b>OBJECTIVE</b> <span id="objective-text"></span></div>
+  <div class="panel" id="toast"></div>
+  <canvas id="minimap" width="170" height="170"></canvas>
+  <div class="menu" id="menu-start">
+    <h1>NEON BAY</h1>
+    <h2>An open-world crime game</h2>
+    <p>Rico Vega is back in Neon Bay with empty pockets and a long memory. Steal cars, outrun the
+    Bay Police, run jobs for Mara Solano and Dante Cross, and take the Coral Heist — six story
+    missions, taxi fares, stunt jumps and 20 neon tokens across a sun-soaked coastal city.</p>
+    <button id="btn-start">START ENGINE</button>
+    <div class="keys"><b>WASD</b> drive / walk &nbsp; <b>Mouse drag</b> camera &nbsp; <b>E</b> steal / exit car<br>
+    <b>Click / F</b> shoot &nbsp; <b>N</b> start mission &nbsp; <b>Shift</b> sprint &nbsp; <b>Space</b> jump / brake<br>
+    <b>P / Esc</b> pause &nbsp; <b>M</b> mute</div>
   </div>
-  <div id="wanted" class="panel">
-    <div id="stars">☆☆☆☆☆</div>
-    <div id="tokens">◆ 0 / 12 TOKENS</div>
-    <div id="ammo"></div>
+  <div class="menu" id="menu-pause">
+    <h2>PAUSED</h2>
+    <p>The city waits. Your cash, rep and mission progress are saved.</p>
+    <button id="btn-resume">RESUME</button>
   </div>
-  <div id="objective" class="panel"><b>OBJECTIVE</b><br>Press ENTER to start the story.</div>
-  <div id="speed" class="panel"></div>
-  <canvas id="minimap" width="180" height="180"></canvas>
-  <div id="toast" style="opacity: 0"></div>
+  <div class="menu" id="menu-busted">
+    <h2>BUSTED</h2>
+    <p>The Bay Police hauled you in. You lost $200, but Neon Bay is still out there.</p>
+    <button id="btn-busted">BACK ON THE STREETS</button>
+  </div>
+  <div class="menu" id="menu-wasted">
+    <h2>WASTED</h2>
+    <p>Your ride is scrap. The hospital patched you up — minus $200.</p>
+    <button id="btn-wasted">BACK ON THE STREETS</button>
+  </div>
+  <div class="menu" id="menu-complete">
+    <h2>NEON BAY IS YOURS</h2>
+    <p>All six story missions complete. Final cash: <b id="final-cash">$0</b><br>
+    Keep playing — fares, stunts and tokens are still out there.</p>
+    <button id="btn-free">KEEP PLAYING</button>
+  </div>
 </div>
-
-<div id="start-screen" class="screen">
-  <h1>NEON BAY</h1>
-  <p>You are Rico Vega, a driver with nothing but fast hands and a faster
-  temper. Mara Solano has work for you — if you can take it. Steal cars,
-  run the beach road, and rob the Casino Luna blind before Dante Cross
-  does. The whole city is yours. The police disagree.</p>
-  <button id="play-btn">PLAY</button>
-  <div class="keys">WASD move / drive &nbsp;·&nbsp; Mouse drag camera &nbsp;·&nbsp; E steal / enter car &nbsp;·&nbsp; Click shoot &nbsp;·&nbsp; R reload &nbsp;·&nbsp; F punch &nbsp;·&nbsp; Shift sprint &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Esc pause</div>
-</div>
-
-<div id="pause-screen" class="screen">
-  <h2>PAUSED</h2>
-  <p>Neon Bay waits for no one — except right now.</p>
-  <button id="resume-btn">RESUME</button>
-  <button id="menu-btn">MAIN MENU</button>
-</div>
-
-<div id="busted-screen" class="screen">
-  <h2>BUSTED</h2>
-  <p>The Neon Bay police finally caught up with you. They took $200 for
-  their trouble. Your cash now: <span id="busted-cash">$0</span></p>
-  <button id="restart-btn">BACK ON THE STREET</button>
-</div>
-
-<div id="wasted-screen" class="screen">
-  <h2>WASTED</h2>
-  <p>Neon Bay chewed you up. Dust yourself off and go again.</p>
-  <button id="retry-btn">TRY AGAIN</button>
-</div>
-
-<div id="complete-screen" class="screen">
-  <h2>STORY COMPLETE</h2>
-  <p>You pulled the Coral Heist, outran the whole department and walked
-  away with <span id="final-cash">$0</span>. Neon Bay is yours, Rico.</p>
-  <button id="explore-btn">KEEP EXPLORING</button>
-</div>
-
+<p id="status" role="status" aria-live="polite"></p>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
