@@ -1,138 +1,148 @@
-// The HUD: health, cash, reputation, clock, wanted stars, mission
-// objective, ammo, token counter, and a live top-down minimap — plus the
-// start, pause, busted, wasted and story-complete screens. The DOM lives
-// in index.html; this class only binds it and keeps it current.
+// Neon Bay — HUD: health, cash, rep, clock, wanted stars, objective,
+// ammo, tokens, toast lines, live minimap, and the menu screens.
+
+import { CFG } from './config.js';
+
 export class Hud {
-  constructor(game) {
-    this.game = game;
-    const $ = (id) => document.getElementById(id);
-    this.el = {
-      hud: $('hud'),
-      healthFill: $('health-fill'),
-      cash: $('cash'),
-      rep: $('rep'),
-      clock: $('clock'),
-      stars: $('stars'),
-      tokens: $('tokens'),
-      objective: $('objective'),
-      ammo: $('ammo'),
-      toast: $('toast'),
-      menu: $('menu'),
-      pause: $('pause'),
-      busted: $('busted'),
-      wasted: $('wasted'),
-      complete: $('complete'),
-      completeStats: $('complete-stats'),
-      minimap: $('minimap'),
-    };
-    this.mm = this.el.minimap.getContext('2d');
-    this.toastTimer = null;
-    $('btn-new').addEventListener('click', () => game.startNewGame());
-    const cont = $('btn-continue');
-    if (cont) cont.addEventListener('click', () => game.continueGame());
-    $('btn-resume').addEventListener('click', () => game.resume());
-    $('btn-quit').addEventListener('click', () => game.toMenu());
-    $('btn-busted-retry').addEventListener('click', () => game.startNewGame());
-    $('btn-wasted-retry').addEventListener('click', () => game.startNewGame());
-    $('btn-complete-again').addEventListener('click', () => game.startNewGame());
-    $('btn-complete-roam').addEventListener('click', () => game.resumeFreeRoam());
-  }
-
-  showOnly(name) {
-    for (const k of ['menu', 'pause', 'busted', 'wasted', 'complete']) {
-      this.el[k].classList.toggle('hidden', k !== name);
+  constructor(doc, city) {
+    this.doc = doc;
+    this.city = city;
+    this.el = {};
+    for (const id of ['health-fill', 'cash', 'rep', 'clock', 'stars', 'tokens', 'objective', 'ammo', 'toast', 'speed', 'minimap']) {
+      this.el[id] = doc.getElementById(id);
     }
-    this.el.hud.classList.toggle('hidden', name !== null);
-  }
-
-  hideAll() {
-    this.showOnly(null);
-  }
-
-  toast(msg) {
-    this.el.toast.textContent = msg;
-    this.el.toast.classList.remove('hidden');
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => this.el.toast.classList.add('hidden'), 3200);
-  }
-
-  update() {
-    const g = this.game;
-    this.el.healthFill.style.width = `${Math.max(0, g.player.health)}%`;
-    this.el.healthFill.style.background = g.player.health > 50 ? '#37d67a' : g.player.health > 25 ? '#ffb13c' : '#ff4040';
-    this.el.cash.textContent = `$${g.cash.toLocaleString()}`;
-    this.el.rep.textContent = `REP ${g.rep}`;
-    const mins = 18 * 60 + 42 + Math.floor(g.time * 0.5);
-    const hh = String(Math.floor(mins / 60) % 24).padStart(2, '0');
-    const mm = String(mins % 60).padStart(2, '0');
-    this.el.clock.textContent = `${hh}:${mm}`;
-    const stars = g.police.stars;
-    this.el.stars.textContent = '★'.repeat(stars) + '☆'.repeat(5 - stars);
-    this.el.stars.style.color = stars >= 3 ? '#ff4040' : '#ffd23e';
-    this.el.tokens.textContent = `◆ ${g.tokens.collected} / 12 TOKENS`;
-    this.el.objective.textContent = g.missions.objectiveText;
-    if (!g.combat.hasGun) this.el.ammo.textContent = '';
-    else if (g.combat.reloadT > 0) this.el.ammo.textContent = 'RELOADING…';
-    else this.el.ammo.textContent = `AMMO ${g.combat.ammo} / 12`;
-    this.drawMinimap();
-  }
-
-  drawMinimap() {
-    const g = this.game;
-    const ctx = this.mm;
-    const S = 180;
-    const scale = S / 700; // city + ocean margin
-    const toX = (x) => (x + 350) * scale;
-    const toZ = (z) => (z + 350) * scale;
-    ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = '#0a2a4a';
-    ctx.fillRect(0, 0, toX(-333), S); // ocean, west
-    ctx.fillStyle = '#1c1826';
-    ctx.fillRect(toX(-333), 0, S - toX(-333), S);
-    ctx.strokeStyle = '#3a3542';
-    ctx.lineWidth = 3;
-    for (let i = -4; i <= 4; i++) {
-      const c = toX(i * 74);
-      ctx.beginPath(); ctx.moveTo(c, 0); ctx.lineTo(c, S); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, c); ctx.lineTo(S, c); ctx.stroke();
+    this.map = this.el.minimap ? this.el.minimap.getContext('2d') : null;
+    this.toastTimer = 0;
+    this.screens = {};
+    for (const id of ['start-screen', 'pause-screen', 'busted-screen', 'wasted-screen', 'complete-screen']) {
+      this.screens[id] = doc.getElementById(id);
     }
-    // Mission target.
-    if (g.missions.state === 'active') {
-      const s = g.missions.current.stages[g.missions.stageI];
-      if (s && s.x !== undefined) {
-        const pulse = 5 + Math.sin(g.time * 5) * 2;
-        ctx.fillStyle = '#ffd23e';
-        ctx.beginPath();
-        ctx.arc(toX(s.x), toZ(s.z), pulse, 0, Math.PI * 2);
-        ctx.fill();
-      }
+  }
+
+  showScreen(name) {
+    for (const [id, el] of Object.entries(this.screens)) {
+      if (el) el.style.display = id === name ? 'flex' : 'none';
+    }
+  }
+
+  hideScreens() {
+    for (const el of Object.values(this.screens)) if (el) el.style.display = 'none';
+  }
+
+  toast(text, seconds = 5) {
+    if (!this.el.toast) return;
+    this.el.toast.textContent = text;
+    this.el.toast.style.opacity = '1';
+    this.toastTimer = seconds;
+  }
+
+  update(dt, s) {
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0 && this.el.toast) this.el.toast.style.opacity = '0';
+    }
+    if (this.el['health-fill']) {
+      this.el['health-fill'].style.width = `${Math.max(0, s.health)}%`;
+      this.el['health-fill'].style.background = s.health > 50 ? '#3aff8a' : s.health > 25 ? '#ffd42a' : '#ff2a2a';
+    }
+    if (this.el.cash) this.el.cash.textContent = `$${Math.floor(s.cash).toLocaleString()}`;
+    if (this.el.rep) this.el.rep.textContent = `REP ${s.rep}`;
+    if (this.el.clock) {
+      const h = Math.floor(s.clock) % 24;
+      const m = Math.floor((s.clock % 1) * 60);
+      this.el.clock.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    if (this.el.stars) {
+      this.el.stars.textContent = '★'.repeat(s.wanted) + '☆'.repeat(5 - s.wanted);
+      this.el.stars.style.color = s.wanted >= 3 ? '#ff2a2a' : '#ffd42a';
+    }
+    if (this.el.tokens) this.el.tokens.textContent = `◆ ${s.tokens} / ${CFG.tokenCount} TOKENS`;
+    if (this.el.objective) this.el.objective.innerHTML = `<b>OBJECTIVE</b><br>${s.objective}`;
+    if (this.el.ammo) {
+      this.el.ammo.textContent = s.hasGun
+        ? (s.reloading ? 'RELOADING…' : `AMMO ${s.ammo}/${CFG.pistolMag}`)
+        : (s.gunUnlocked ? 'PISTOL — press 1 to draw' : '');
+    }
+    if (this.el.speed) this.el.speed.textContent = s.inCar ? `${Math.round(s.speed * 3.6)} km/h` : '';
+    if (this.map) this.drawMinimap(s);
+  }
+
+  drawMinimap(s) {
+    const ctx = this.map;
+    const W = 180;
+    const H = 180;
+    const scale = W / 760; // world -380..380 -> 0..180
+    const toMap = (x, z) => [(x + 380) * scale, (z + 380) * scale];
+    ctx.fillStyle = 'rgba(10, 12, 24, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+    // Ocean.
+    ctx.fillStyle = '#1a4a6a';
+    ctx.fillRect(0, (400 + 380) * scale, W, H - (400 + 380) * scale);
+    // Sand.
+    ctx.fillStyle = '#8a6a42';
+    ctx.fillRect(0, (360 + 380) * scale, W, (400 - 360) * scale);
+    // Buildings as dark blocks.
+    ctx.fillStyle = '#3a3f4a';
+    for (const c of this.city.colliders) {
+      const [x, z] = toMap(c.minX, c.minZ);
+      ctx.fillRect(x, z, (c.maxX - c.minX) * scale, (c.maxZ - c.minZ) * scale);
+    }
+    // Roads.
+    ctx.strokeStyle = '#5a5a66';
+    ctx.lineWidth = 2;
+    for (let a = -320; a <= 320; a += 80) {
+      const [x1, y1] = toMap(a, -340);
+      const [x2, y2] = toMap(a, 340);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      const [x3, y3] = toMap(-340, a);
+      const [x4, y4] = toMap(340, a);
+      ctx.beginPath(); ctx.moveTo(x3, y3); ctx.lineTo(x4, y4); ctx.stroke();
     }
     // Tokens.
-    ctx.fillStyle = '#2ee6ff';
-    for (const t of g.tokens.list) {
+    ctx.fillStyle = '#2ad4ff';
+    for (const t of s.tokenList || []) {
       if (t.taken) continue;
-      ctx.fillRect(toX(t.x) - 1.5, toZ(t.z) - 1.5, 3, 3);
+      const [x, y] = toMap(t.x, t.z);
+      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
     }
-    // Traffic cars.
-    ctx.fillStyle = '#c8c8d8';
-    for (const t of g.traffic.cars) ctx.fillRect(toX(t.car.x) - 1, toZ(t.car.z) - 1, 2, 2);
-    // Police: flashing red/blue.
-    ctx.fillStyle = Math.floor(g.time * 4) % 2 === 0 ? '#ff4040' : '#4080ff';
-    for (const e of g.police.cars) {
+    // Mission beacon.
+    if (s.beacon) {
+      const [x, y] = toMap(s.beacon.x, s.beacon.z);
+      ctx.fillStyle = '#ffd42a';
       ctx.beginPath();
-      ctx.arc(toX(e.car.x), toZ(e.car.z), 3, 0, Math.PI * 2);
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Traffic.
+    ctx.fillStyle = '#9a9aa8';
+    for (const c of s.trafficCars || []) {
+      const [x, y] = toMap(c.x, c.z);
+      ctx.fillRect(x - 1, y - 1, 2, 2);
+    }
+    // Cruisers.
+    ctx.fillStyle = '#ff2a2a';
+    for (const c of s.cruisers || []) {
+      const [x, y] = toMap(c.x, c.z);
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
     // Player arrow.
-    const px = toX(g.player.x);
-    const pz = toZ(g.player.z);
-    const h = g.player.inCar ? g.player.inCar.heading : g.player.heading;
+    const [px, py] = toMap(s.playerX, s.playerZ);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-s.playerHeading);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.moveTo(px + Math.sin(h) * 6, pz + Math.cos(h) * 6);
-    ctx.lineTo(px + Math.sin(h + 2.5) * 5, pz + Math.cos(h + 2.5) * 5);
-    ctx.lineTo(px + Math.sin(h - 2.5) * 5, pz + Math.cos(h - 2.5) * 5);
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4, 5);
+    ctx.lineTo(-4, 5);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
+    // North marker.
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px Arial';
+    ctx.fillText('N', W - 12, 12);
   }
 }

@@ -1,272 +1,237 @@
-// Traffic and pedestrians. 20 cars drive Manhattan routes between
-// intersections and stop at red lights; 36 pedestrians walk the sidewalks
-// in varied clothes and fall (then respawn) when run over; 16 cars sit
-// parked at the curb, ready to be stolen.
+// Neon Bay — traffic: 20 AI cars on the avenue grid, 36 pedestrians,
+// 16 parked cars. Peds fall when run over, then get back up and respawn.
+
 import * as THREE from 'three';
-import { CONFIG, avenue, nearestIntersection } from './config.js';
+import { CFG, AVENUES, BLOCKS, nearestAvenue, clamp } from './config.js';
+import { Rng } from './rng.js';
 import { Car } from './vehicles.js';
 
-const SKINS = [0xc98a5e, 0x8a5a3a, 0xe8b88a, 0x6a4230];
-const HAIRS = [0x1a1210, 0x3a2a1a, 0x6a6a6a, 0xd8b13c];
-const SHIRTS = [0xc0392b, 0x3a6fd8, 0x2e8a5a, 0xe8e0d0, 0x8a4a9a, 0xd8a03c];
-const PANTS = [0x2e2e38, 0x3a4a6a, 0x5a3a2e, 0x222226];
+const PED_SKINS = [0xc08a5a, 0x8a5a3a, 0xe0b08a, 0x5a3a2a];
+const PED_SHIRTS = [0xc02a2a, 0x2a6ab0, 0x3a8a3a, 0xd8a02a, 0x8a2a8a, 0x2a8a8a, 0xd8d8d8, 0x2a2a2a];
+const PED_HAIR = [0x1a1a1a, 0x5a3a1a, 0xd8c86a, 0x8a8a8a];
 
 export class Traffic {
-  constructor(scene, city, rng) {
+  constructor(scene, city) {
     this.scene = scene;
     this.city = city;
-    this.rng = rng;
-    this.cars = []; // moving traffic: {car, tx, tz, px, pz, speed, cruise}
-    this.peds = [];
+    this.rng = new Rng(777);
+    this.cars = [];    // { car, avenue, along, dir, speed, targetSpeed, waiting }
+    this.peds = [];    // { group, x, z, heading, speed, state, timer, height }
     this.parked = [];
     this.buildParked();
-    this.buildTraffic();
+    this.buildCars();
     this.buildPeds();
-  }
-
-  // A fresh world: remove every traffic mesh and pedestrian, then build
-  // them again from the seed. Used by New Game so a stolen parked car
-  // comes back and the streets reset.
-  dispose() {
-    for (const t of this.cars) t.car.remove();
-    for (const c of this.parked) c.remove();
-    for (const p of this.peds) this.scene.remove(p.group);
-    this.cars = [];
-    this.peds = [];
-    this.parked = [];
-  }
-
-  rebuild() {
-    this.dispose();
-    this.buildParked();
-    this.buildTraffic();
-    this.buildPeds();
-  }
-
-  randomIntersection() {
-    const i = this.rng.int(-CONFIG.gridHalf, CONFIG.gridHalf);
-    const j = this.rng.int(-CONFIG.gridHalf, CONFIG.gridHalf);
-    return { x: avenue(i), z: avenue(j) };
   }
 
   buildParked() {
-    // Parked[0] is always a sedan near the spawn corner, so a headless
-    // test can always find one to steal.
-    const first = new Car(this.scene, 'sedan', 9.5, 40, Math.PI, 0x3a6fd8);
-    first.driver = null;
-    this.parked.push(first);
-    const kinds = ['sedan', 'taxi', 'van', 'muscle', 'pickup', 'sedan'];
-    for (let i = 1; i < CONFIG.parkedCars; i++) {
-      const kind = this.rng.pick(kinds);
-      const along = this.rng.pick([-296, -222, -148, -74, 0, 74, 148, 222, 296]);
-      const cross = this.rng.pick([-296, -222, -148, -74, 0, 74, 148, 222]);
-      const ns = this.rng.chance(0.5);
-      const x = ns ? along + this.rng.pick([-9.5, 9.5]) : cross + this.rng.range(-260, 260);
-      const z = ns ? cross + this.rng.range(-260, 260) : along + this.rng.pick([-9.5, 9.5]);
-      const heading = ns ? (this.rng.chance(0.5) ? 0 : Math.PI) : (this.rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2);
-      const car = new Car(this.scene, kind, x, z, heading);
-      car.driver = null;
+    const rng = this.rng;
+    const kinds = ['sedan', 'van', 'pickup', 'muscle'];
+    for (let i = 0; i < CFG.parkedCars; i++) {
+      const a = rng.pick(AVENUES);
+      const along = rng.float(-300, 300);
+      const horiz = rng.chance(0.5);
+      const side = rng.chance(0.5) ? 1 : -1;
+      const x = horiz ? along : a + side * 5.2;
+      const z = horiz ? a + side * 5.2 : along;
+      const kind = rng.pick(kinds);
+      const car = new Car(this.scene, kind, rng.pick([0x8a9ab0, 0xb03030, 0x3a6ab0, 0x2a2a2a, 0x7a5a3a]), x, z, horiz ? Math.PI / 2 : 0);
+      car.speed = 0;
       this.parked.push(car);
     }
   }
 
-  buildTraffic() {
-    const kinds = ['sedan', 'taxi', 'van', 'muscle', 'pickup', 'sedan', 'sedan'];
-    for (let i = 0; i < CONFIG.trafficCars; i++) {
-      const start = this.randomIntersection();
-      const target = this.randomIntersection();
-      const car = new Car(this.scene, this.rng.pick(kinds), start.x, start.z, 0);
-      car.driver = 'traffic';
-      car.speed = 0;
+  buildCars() {
+    const rng = this.rng;
+    const kinds = ['sedan', 'taxi', 'van', 'sedan', 'pickup', 'muscle'];
+    for (let i = 0; i < CFG.trafficCars; i++) {
+      const horiz = rng.chance(0.5);
+      const avenue = rng.pick(AVENUES);
+      const along = rng.float(-320, 320);
+      const dir = rng.chance(0.5) ? 1 : -1;
+      const kind = rng.pick(kinds);
+      const color = kind === 'taxi' ? 0xffc42a : rng.pick([0x8a9ab0, 0xb03030, 0x3a6ab0, 0xd8d8d8, 0x2a2a2a, 0x3a5a2a]);
+      const x = horiz ? along : avenue;
+      const z = horiz ? avenue : along;
+      const heading = horiz ? (dir > 0 ? -Math.PI / 2 : Math.PI / 2) : (dir > 0 ? Math.PI : 0);
+      const car = new Car(this.scene, kind, color, x, z, heading);
       this.cars.push({
-        car,
-        tx: target.x,
-        tz: target.z,
-        px: start.x,
-        pz: start.z,
-        speed: this.rng.range(10, 14),
-        cruise: this.rng.range(10, 14),
+        car, horiz, avenue, dir,
+        speed: rng.float(7, 11),
+        targetSpeed: rng.float(8, 12),
+        waiting: 0,
       });
-      this.aimAtTarget(this.cars[i]);
     }
   }
 
   buildPeds() {
-    for (let i = 0; i < CONFIG.peds; i++) {
-      const h = this.rng.range(0.92, 1.08);
+    const rng = this.rng;
+    for (let i = 0; i < CFG.pedestrians; i++) {
       const g = new THREE.Group();
-      const skin = new THREE.MeshLambertMaterial({ color: this.rng.pick(SKINS) });
-      const shirt = new THREE.MeshLambertMaterial({ color: this.rng.pick(SHIRTS) });
-      const pants = new THREE.MeshLambertMaterial({ color: this.rng.pick(PANTS) });
-      const hair = new THREE.MeshLambertMaterial({ color: this.rng.pick(HAIRS) });
-      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.65, 0.3), shirt);
-      torso.position.y = 1.05 * h;
+      const shirt = new THREE.MeshLambertMaterial({ color: rng.pick(PED_SHIRTS) });
+      const skin = new THREE.MeshLambertMaterial({ color: rng.pick(PED_SKINS) });
+      const pants = new THREE.MeshLambertMaterial({ color: rng.pick([0x2a2a3a, 0x3a4a6a, 0x5a3a2a]) });
+      const h = rng.float(0.92, 1.08);
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.28), shirt);
+      torso.position.y = 0.95 * h;
       g.add(torso);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.36), skin);
-      head.position.y = 1.62 * h;
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.28), skin);
+      head.position.y = 1.42 * h;
       g.add(head);
-      const hairM = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.38), hair);
-      hairM.position.y = 1.83 * h;
-      g.add(hairM);
-      if (this.rng.chance(0.3)) {
-        const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.1, 8), new THREE.MeshLambertMaterial({ color: this.rng.pick([0xc0392b, 0x2e2e38, 0xd8b13c]) }));
-        hat.position.y = 1.92 * h;
+      const hair = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.32), new THREE.MeshLambertMaterial({ color: rng.pick(PED_HAIR) }));
+      hair.position.y = 1.6 * h;
+      g.add(hair);
+      if (rng.chance(0.3)) {
+        const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.1, 8), new THREE.MeshLambertMaterial({ color: rng.pick(PED_SHIRTS) }));
+        hat.position.y = 1.68 * h;
         g.add(hat);
       }
-      const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), pants);
-      legL.position.set(-0.14, 0.35 * h, 0);
+      const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.6, 0.2), pants);
+      legL.position.set(-0.13, 0.32 * h, 0);
       g.add(legL);
       const legR = legL.clone();
-      legR.position.x = 0.14;
+      legR.position.x = 0.13;
       g.add(legR);
-      const spot = this.sidewalkPoint();
-      g.position.set(spot.x, 0, spot.z);
+      // Start on a sidewalk beside a random avenue.
+      const a = rng.pick(AVENUES);
+      const along = rng.float(-320, 320);
+      const side = rng.chance(0.5) ? 1 : -1;
+      const horiz = rng.chance(0.5);
+      const x = horiz ? along : a + side * 10.5;
+      const z = horiz ? a + side * 10.5 : along;
+      g.position.set(x, 0, z);
+      g.scale.setScalar(h);
       this.scene.add(g);
-      const dest = this.sidewalkPoint();
       this.peds.push({
-        group: g, x: spot.x, z: spot.z, dx: dest.x, dz: dest.z,
-        speed: this.rng.range(1.1, 2.1), state: 'walk', fallT: 0, h,
-        legL, legR, phase: this.rng.range(0, 6.28),
+        group: g, x, z, h,
+        heading: rng.float(0, Math.PI * 2),
+        speed: rng.float(1.2, 2.2),
+        state: 'walk', timer: rng.float(0, 6),
+        legL, legR, phase: rng.float(0, 6),
       });
     }
   }
 
-  sidewalkPoint() {
-    // A point on a sidewalk: 10 m off an avenue, anywhere along it.
-    const along = this.rng.pick([-296, -222, -148, -74, 0, 74, 148, 222, 296]);
-    const cross = this.rng.range(-280, 280);
-    const side = this.rng.pick([-10.5, 10.5]);
-    return this.rng.chance(0.5)
-      ? { x: along + side, z: cross }
-      : { x: cross, z: along + side };
-  }
-
-  aimAtTarget(t) {
-    const dx = t.tx - t.car.x;
-    const dz = t.tz - t.car.z;
-    t.car.heading = Math.atan2(dx, dz);
-  }
-
-  // Nearest parked car within r metres of (x, z), or null.
-  stealNear(x, z, r = 4.5) {
-    let best = null;
-    let bestD = r;
-    for (const car of this.parked) {
-      const d = Math.hypot(car.x - x, car.z - z);
-      if (d < bestD) { bestD = d; best = car; }
-    }
-    return best;
-  }
-
-  removeParked(car) {
-    const i = this.parked.indexOf(car);
-    if (i >= 0) this.parked.splice(i, 1);
-  }
-
-  // A traffic car that the player just stole stops being traffic.
-  removeMoving(car) {
-    const i = this.cars.findIndex((t) => t.car === car);
-    if (i >= 0) this.cars.splice(i, 1);
-  }
-
-  // Nearest moving traffic car within r metres, or null.
-  movingNear(x, z, r = 4.5) {
-    let best = null;
-    let bestD = r;
-    for (const t of this.cars) {
-      const d = Math.hypot(t.car.x - x, t.car.z - z);
-      if (d < bestD) { bestD = d; best = t.car; }
-    }
-    return best;
-  }
-
-  fallPed(ped) {
-    if (ped.state !== 'walk') return;
-    ped.state = 'fallen';
-    ped.fallT = 3;
-    ped.group.rotation.x = -Math.PI / 2;
-    ped.group.position.y = 0.3;
-  }
-
-  update(dt, game) {
-    const player = game.player;
-    const playerCar = player.inCar;
+  // Manhattan route: drive along one avenue, turn at a random intersection.
+  update(dt, playerCar, onRunOver) {
     // --- traffic cars ---
     for (const t of this.cars) {
-      const dx = t.tx - t.car.x;
-      const dz = t.tz - t.car.z;
-      const dist = Math.hypot(dx, dz);
-      const ns = Math.abs(dx) < 1; // travelling along z
-      let want = t.cruise;
-      if (dist < 18 && !this.city.lightIsGreen(t.tx, t.tz, ns)) want = 0;
-      // Ease toward the wanted speed.
-      t.speed += Math.max(-14 * dt, Math.min(8 * dt, want - t.speed));
-      if (dist < 1.5) {
-        // Reached the intersection: pick a new neighbour, never straight back.
-        const cur = nearestIntersection(t.car.x, t.car.z);
-        const options = [];
-        for (const [ox, oz] of [[74, 0], [-74, 0], [0, 74], [0, -74]]) {
-          const nx = cur.x + ox;
-          const nz = cur.z + oz;
-          if (Math.abs(nx) > 296 || Math.abs(nz) > 296) continue;
-          if (nx === t.px && nz === t.pz && this.rng.chance(0.9)) continue;
-          options.push({ x: nx, z: nz });
-        }
-        const next = options.length ? this.rng.pick(options) : { x: t.px, z: t.pz };
-        t.px = cur.x;
-        t.pz = cur.z;
-        t.tx = next.x;
-        t.tz = next.z;
-        this.aimAtTarget(t);
-      } else {
-        t.car.heading = Math.atan2(dx, dz);
+      const c = t.car;
+      // Car ahead? Slow down instead of rear-ending it.
+      let ahead = false;
+      for (const o of this.cars) {
+        if (o === t) continue;
+        const dx = o.car.x - c.x;
+        const dz = o.car.z - c.z;
+        const fwd = t.horiz ? dx * t.dir : dz * t.dir;
+        const side = t.horiz ? Math.abs(dz) : Math.abs(dx);
+        if (fwd > 0 && fwd < 12 && side < 3) { ahead = true; break; }
       }
-      t.car.speed = t.speed;
-      const f = t.car.forward();
-      t.car.x += f.x * t.speed * dt;
-      t.car.z += f.z * t.speed * dt;
-      t.car.syncMesh();
+      // Red light ahead at the next intersection?
+      let redAhead = false;
+      const next = t.horiz ? nearestAvenue(c.x + t.dir * 14) : nearestAvenue(c.z + t.dir * 14);
+      const crossing = t.horiz ? (Math.abs(c.x - next) < 14) : (Math.abs(c.z - next) < 14);
+      if (crossing) {
+        const lx = t.horiz ? next : c.x;
+        const lz = t.horiz ? c.z : next;
+        if (this.city.lightAt(lx, lz) === 'red') redAhead = true;
+      }
+      const want = ahead || redAhead ? 0 : t.targetSpeed;
+      t.speed += clamp(want - t.speed, -8 * dt, 5 * dt);
+      // Advance along the avenue; turn at a random intersection.
+      const step = t.speed * t.dir * dt;
+      if (t.horiz) c.x += step; else c.z += step;
+      const atCross = t.horiz
+        ? Math.abs(c.x - nearestAvenue(c.x)) < 1.5
+        : Math.abs(c.z - nearestAvenue(c.z)) < 1.5;
+      if (atCross && this.rng.chance(0.02)) {
+        // Turn onto the crossing avenue.
+        t.horiz = !t.horiz;
+        t.avenue = t.horiz ? c.z : c.x;
+        t.dir = this.rng.chance(0.5) ? 1 : -1;
+        c.heading = t.horiz ? (t.dir > 0 ? -Math.PI / 2 : Math.PI / 2) : (t.dir > 0 ? Math.PI : 0);
+      }
+      // Wrap around the city edge.
+      if (c.x > 340) c.x = -340;
+      if (c.x < -340) c.x = 340;
+      if (c.z > 340) c.z = -340;
+      if (c.z < -340) c.z = 340;
+      c.group.position.set(c.x, 0, c.z);
+      c.group.rotation.y = c.heading;
+      for (const w of c.wheels) w.rotation.x += t.speed * dt * 2.4;
+      // Player's car shoves traffic aside (soft).
+      if (playerCar) {
+        const d = Math.hypot(c.x - playerCar.x, c.z - playerCar.z);
+        if (d < 4 && d > 0.01) {
+          const push = (4 - d) * 0.5;
+          c.x += ((c.x - playerCar.x) / d) * push;
+          c.z += ((c.z - playerCar.z) / d) * push;
+        }
+      }
     }
     // --- pedestrians ---
     for (const p of this.peds) {
-      if (p.state === 'fallen') {
-        p.fallT -= dt;
-        if (p.fallT <= 0) {
-          const spot = this.sidewalkPoint();
-          p.x = spot.x;
-          p.z = spot.z;
-          const dest = this.sidewalkPoint();
-          p.dx = dest.x;
-          p.dz = dest.z;
-          p.state = 'walk';
+      if (p.state === 'down') {
+        p.timer -= dt;
+        p.group.rotation.x = -Math.PI / 2 * 0.9;
+        if (p.timer <= 0) {
+          // Get up and respawn on a fresh sidewalk.
+          const a = this.rng.pick(AVENUES);
+          const along = this.rng.float(-320, 320);
+          const side = this.rng.chance(0.5) ? 1 : -1;
+          const horiz = this.rng.chance(0.5);
+          p.x = horiz ? along : a + side * 10.5;
+          p.z = horiz ? a + side * 10.5 : along;
           p.group.rotation.x = 0;
-          p.group.position.y = 0;
+          p.state = 'walk';
+          p.timer = this.rng.float(2, 8);
         }
         continue;
       }
-      const dx = p.dx - p.x;
-      const dz = p.dz - p.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 1.5) {
-        const dest = this.sidewalkPoint();
-        p.dx = dest.x;
-        p.dz = dest.z;
-        continue;
+      p.timer -= dt;
+      if (p.timer <= 0) {
+        p.heading = this.rng.float(0, Math.PI * 2);
+        p.timer = this.rng.float(3, 9);
       }
-      p.phase += dt * p.speed * 3.4;
-      p.x += (dx / dist) * p.speed * dt;
-      p.z += (dz / dist) * p.speed * dt;
-      p.group.position.set(p.x, 0, p.z);
-      p.group.rotation.y = Math.atan2(dx, dz);
+      p.x += -Math.sin(p.heading) * p.speed * dt;
+      p.z += -Math.cos(p.heading) * p.speed * dt;
+      // Stay near the city; bounce off the edges.
+      if (Math.abs(p.x) > 340 || Math.abs(p.z) > 340) p.heading += Math.PI;
+      p.phase += dt * p.speed * 4;
       p.legL.rotation.x = Math.sin(p.phase) * 0.5;
       p.legR.rotation.x = -Math.sin(p.phase) * 0.5;
-      // Run over by the player's car: fall down.
-      if (playerCar && Math.abs(playerCar.speed) > 5) {
-        if (Math.hypot(playerCar.x - p.x, playerCar.z - p.z) < 2.6) {
-          this.fallPed(p);
-          game.police.addHeat(8);
+      p.group.position.set(p.x, 0, p.z);
+      p.group.rotation.y = p.heading;
+      // Run over by the player's car?
+      if (playerCar && Math.abs(playerCar.speed) > 3) {
+        const d = Math.hypot(p.x - playerCar.x, p.z - playerCar.z);
+        if (d < 2.2) {
+          p.state = 'down';
+          p.timer = 5;
+          if (onRunOver) onRunOver(p);
         }
       }
     }
+  }
+
+  // Nearest drivable car to a point (traffic or parked), within range.
+  nearestCar(x, z, range) {
+    let best = null;
+    let bd = range;
+    for (const t of this.cars) {
+      const d = Math.hypot(t.car.x - x, t.car.z - z);
+      if (d < bd) { bd = d; best = t.car; }
+    }
+    for (const c of this.parked) {
+      const d = Math.hypot(c.x - x, c.z - z);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+
+  removeCar(car) {
+    const i = this.cars.findIndex((t) => t.car === car);
+    if (i >= 0) this.cars.splice(i, 1);
+    const j = this.parked.indexOf(car);
+    if (j >= 0) this.parked.splice(j, 1);
   }
 }

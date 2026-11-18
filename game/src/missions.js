@@ -1,230 +1,250 @@
-// The story: four missions for Rico Vega, a driver working for the fixer
-// Mara Solano against the rival Dante Cross. The state machine is
-// idle → active → complete() → idle, and complete() is the only way out of
-// active — a finished mission can never park the machine in a dead state,
-// so the next mission always starts after the short delay.
-import * as THREE from 'three';
-import { CONFIG } from './config.js';
+// Neon Bay — the story: 4 missions for Rico Vega, fixer Mara Solano and
+// rival Dante Cross. The machine is idle -> active -> complete() -> idle;
+// complete() always returns to idle, the only state update() starts the
+// next mission from, so a finished mission can never park the chain.
 
-const DEFS = [
+import * as THREE from 'three';
+import { CFG, PLACES } from './config.js';
+
+const STORY = [
   {
     name: 'First Wheels',
-    briefing: 'Mara Solano needs a driver. Meet her at the corner.',
-    reward: 500,
+    intro: "Mara Solano: Rico. You need wheels before you need a name. Take a car — any car — and bring it to my garage.",
     stages: [
-      { text: 'Meet Mara at the corner', type: 'meet', x: 0, z: 8, r: 6 },
-      { text: 'Steal a car — press E near a parked car', type: 'steal' },
-      { text: "Drive the car to Mara's garage", type: 'reach', x: 148, z: -37, r: 12, needCar: true },
+      { label: 'Steal a car — walk up to one and press E', needsCar: true, x: null, z: null },
+      { label: "Drive the car to Mara's garage", x: PLACES.garage.x, z: PLACES.garage.z, radius: 10 },
     ],
-    onComplete(game) {
-      game.combat.giveGun();
-      game.hud.toast('Mara: nice wheels. Take this pistol — you will need it.');
-    },
+    reward: 500,
+    onDone: 'gun',
   },
   {
     name: 'Bay Run',
-    briefing: 'A package for the north side. Three checkpoints, no stops.',
-    reward: 1200,
+    intro: "Mara: Package in the trunk. Three drops down Ocean Drive, fast and quiet. Dante's boys are watching the beach road.",
     stages: [
-      { text: 'Pick up the package at the market', type: 'reach', x: 0, z: -222, r: 8 },
-      { text: 'Checkpoint 1 of 3 — Ocean Drive', type: 'reach', x: 148, z: 222, r: 10 },
-      { text: 'Checkpoint 2 of 3 — Ocean Drive', type: 'reach', x: -148, z: 222, r: 10 },
-      { text: 'Checkpoint 3 of 3 — Ocean Drive', type: 'reach', x: -148, z: -148, r: 10 },
+      { label: 'Pick up the package at the garage', x: PLACES.garage.x, z: PLACES.garage.z, radius: 8 },
+      { label: 'Checkpoint 1 of 3 — Ocean Drive', x: -160, z: 320, radius: 10 },
+      { label: 'Checkpoint 2 of 3 — Ocean Drive', x: 0, z: 320, radius: 10 },
+      { label: 'Checkpoint 3 of 3 — Ocean Drive', x: 160, z: 320, radius: 10 },
     ],
-    onComplete(game) {
-      game.sportsUnlocked = true;
-      game.spawnSportsCar();
-      game.hud.toast('Mara: a sports car is waiting for you at the marina.');
-    },
+    reward: 1200,
+    onDone: 'sports',
   },
   {
     name: 'Neon Nights',
-    briefing: 'Three drops before dawn. The bay never sleeps.',
-    reward: 2000,
+    intro: "Mara: Club Volt is short three crates. Pick them up, run the drops, and don't let Dante Cross buy you off.",
     stages: [
-      { text: 'Pick up the goods at the pier', type: 'reach', x: 37, z: 222, r: 8 },
-      { text: 'Drop 1 of 3 — Northside', type: 'reach', x: -222, z: -74, r: 10 },
-      { text: 'Drop 2 of 3 — East End', type: 'reach', x: 222, z: 148, r: 10 },
-      { text: 'Drop 3 of 3 — South Market', type: 'reach', x: 74, z: -222, r: 10 },
+      { label: 'Pick up the crates at Club Volt', x: PLACES.clubVolt.x, z: PLACES.clubVolt.z, radius: 8 },
+      { label: 'Drop 1 of 3 — Eastside', x: 280, z: 80, radius: 10 },
+      { label: 'Drop 2 of 3 — North End', x: -240, z: -200, radius: 10 },
+      { label: 'Drop 3 of 3 — South Beach', x: 80, z: 280, radius: 10 },
     ],
-    onComplete(game) {
-      game.hud.toast('Dante Cross is asking questions. One last job, then you are out.');
-    },
+    reward: 2000,
+    onDone: null,
   },
   {
     name: 'The Coral Heist',
-    briefing: 'Casino Luna. Eight seconds in the vault, then run.',
-    reward: 8000,
+    intro: "Dante Cross: The Casino Luna vault, Rico. Eight seconds and the money is ours. The whole city's police will be on you — so be faster.",
     stages: [
-      { text: 'Get to the Casino Luna', type: 'reach', x: 185, z: 148, r: 10 },
-      { text: 'Hold the vault — stay in the ring', type: 'hold', x: 185, z: 148, r: CONFIG.holdRadius },
-      { text: 'Escape to the marina', type: 'reach', x: -318, z: 222, r: 12 },
+      { label: 'Get to Casino Luna', x: PLACES.casino.x, z: PLACES.casino.z, radius: 10 },
+      { label: 'Hold the vault — stay in the ring', x: PLACES.casino.x, z: PLACES.casino.z, radius: 9, hold: CFG.vaultHoldSeconds },
+      { label: 'Escape to the Marina — 4 stars', x: PLACES.marina.x, z: PLACES.marina.z, radius: 12 },
     ],
-    onComplete(game) {
-      game.hud.toast('Rico Vega walks out of Neon Bay $11,700 richer.');
-    },
+    reward: 8000,
+    onDone: null,
   },
 ];
 
 export class Missions {
-  constructor(scene, game) {
+  constructor(scene, hooks) {
     this.scene = scene;
-    this.game = game;
-    this.defs = DEFS;
-    this.state = 'idle'; // 'idle' | 'active'
-    this.current = null;
-    this.stageI = 0;
-    this.stage = { text: 'Free roam — Neon Bay is yours' };
-    this.missionsDone = 0;
-    this.idleT = 0;
-    this.holdT = 0;
+    this.hooks = hooks; // { reward, unlockGun, unlockSports, setWanted, setStandoff, toast, sound }
+    this.index = 0;      // next mission to start
+    this.state = 'idle'; // idle | active | complete (story done)
+    this.stage = 0;
+    this.holdTimer = 0;
+    this.nextDelay = 0;
+    this.started = false; // the game has begun (start screen dismissed)
+    // Beacon: a translucent beam + ground ring at the current target.
+    this.beacon = new THREE.Group();
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 1.4, 60, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xffd42a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    beam.position.y = 30;
+    this.beacon.add(beam);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(4, 6, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd42a, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.15;
+    this.beacon.add(ring);
+    this.beacon.visible = false;
+    scene.add(this.beacon);
+    // Mara: an NPC who stands at the current meeting point.
+    this.mara = this.buildMara();
+  }
 
-    // The beacon: a light beam and a ground ring over the current target.
-    const beamMat = new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.12, depthWrite: false });
-    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 60, 12, 1, true), beamMat);
-    this.beam.position.y = 30;
-    this.beam.visible = false;
-    scene.add(this.beam);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
-    this.ring = new THREE.Mesh(new THREE.RingGeometry(7, 9, 32), ringMat);
-    this.ring.rotation.x = -Math.PI / 2;
-    this.ring.position.y = 0.15;
-    this.ring.visible = false;
-    scene.add(this.ring);
-
-    // Mara Solano, waiting at the corner for mission one.
+  buildMara() {
     const g = new THREE.Group();
-    const coat = new THREE.MeshLambertMaterial({ color: 0x8a2a6a });
-    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.7, 0.3), coat);
-    torso.position.y = 1.1;
-    g.add(torso);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.36), skin);
-    head.position.y = 1.68;
+    const dress = new THREE.MeshLambertMaterial({ color: 0xc02a6a });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe0b08a });
+    const hair = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.9, 0.3), dress);
+    body.position.y = 1.0;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.3), skin);
+    head.position.y = 1.66;
     g.add(head);
-    const hairM = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.4), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
-    hairM.position.y = 1.9;
+    const hairM = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.34), hair);
+    hairM.position.y = 1.86;
     g.add(hairM);
-    g.position.set(0, 0, 8);
-    scene.add(g);
-    this.mara = g;
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.6, 0.2), skin);
+    legL.position.set(-0.12, 0.3, 0);
+    g.add(legL);
+    const legR = legL.clone();
+    legR.position.x = 0.12;
+    g.add(legR);
+    g.position.set(PLACES.garage.x + 4, 0, PLACES.garage.z);
+    g.visible = false;
+    this.scene.add(g);
+    return g;
   }
 
-  get objectiveText() {
-    if (this.state === 'active' && this.current) {
-      return `${this.current.name} — ${this.stage.text}`;
+  get current() { return STORY[this.index] || null; }
+  get done() { return this.state === 'complete'; }
+
+  objective() {
+    if (this.state === 'complete') return 'Story complete — Neon Bay is yours. Keep exploring.';
+    if (!this.started) return 'Press ENTER to start the story.';
+    if (this.state === 'idle') return 'Get ready…';
+    const m = this.current;
+    if (!m) return '';
+    const stage = m.stages[this.stage];
+    if (stage.hold) {
+      const left = Math.max(0, stage.hold - this.holdTimer);
+      return `${stage.label} — ${left.toFixed(1)}s`;
     }
-    if (this.missionsDone >= 4) return 'Story complete — Neon Bay is yours';
-    return 'Free roam — Neon Bay is yours';
+    return stage.label;
   }
 
-  reset() {
-    this.state = 'idle';
-    this.current = null;
-    this.stageI = 0;
-    this.stage = { text: 'Free roam — Neon Bay is yours' };
-    this.missionsDone = 0;
-    this.idleT = 0;
-    this.holdT = 0;
-    this.beam.visible = false;
-    this.ring.visible = false;
-    this.mara.visible = true;
+  beaconTarget() {
+    if (this.state !== 'active') return null;
+    const stage = this.current.stages[this.stage];
+    if (stage.x === null || stage.x === undefined) return null;
+    return { x: stage.x, z: stage.z };
   }
 
-  startNext() {
-    if (this.missionsDone >= this.defs.length) return;
-    this.current = this.defs[this.missionsDone];
-    this.stageI = 0;
+  begin() {
+    this.started = true;
+    this.nextDelay = 0.5;
+  }
+
+  startMission(i) {
+    this.index = i;
+    this.stage = 0;
+    this.holdTimer = 0;
     this.state = 'active';
-    this.holdT = 0;
-    this.setStageText();
-    this.game.hud.toast(`${this.current.name}: ${this.current.briefing}`);
-    if (this.missionsDone === 0) this.mara.visible = true;
-  }
-
-  setStageText() {
-    const s = this.current.stages[this.stageI];
-    this.stage = { text: s.text };
-    if (s.x !== undefined) {
-      this.beam.position.x = s.x;
-      this.beam.position.z = s.z;
-      this.ring.position.x = s.x;
-      this.ring.position.z = s.z;
-      this.ring.scale.setScalar((s.r || 10) / 8);
-      this.beam.visible = true;
-      this.ring.visible = true;
-    } else {
-      this.beam.visible = false;
-      this.ring.visible = false;
-    }
-    // The vault hold starts the standoff: heat jumps, police ring the vault.
-    if (this.current.name === 'The Coral Heist' && s.type === 'hold') {
-      this.game.police.setHeat(60);
-      this.game.police.holdPos = { x: s.x, z: s.z };
-    }
-  }
-
-  advance() {
-    this.stageI++;
-    if (this.stageI >= this.current.stages.length) {
-      this.complete();
-      return;
-    }
-    this.setStageText();
+    const m = this.current;
+    if (this.hooks.toast) this.hooks.toast(`${m.name} — ${m.intro}`);
+    if (this.hooks.sound) this.hooks.sound('mission');
+    this.mara.visible = i === 0;
   }
 
   complete() {
-    const def = this.current;
-    this.game.cash += def.reward;
-    this.game.rep += 25;
-    this.game.audio.cash();
-    this.game.hud.toast(`${def.name} complete — $${def.reward.toLocaleString()}`);
-    if (def.onComplete) def.onComplete(this.game);
-    this.missionsDone++;
+    const m = this.current;
+    if (this.hooks.reward) this.hooks.reward(m.reward);
+    if (this.hooks.toast) this.hooks.toast(`${m.name} complete — $${m.reward.toLocaleString()} earned.`);
+    if (this.hooks.sound) this.hooks.sound('cash');
+    if (m.onDone === 'gun' && this.hooks.unlockGun) this.hooks.unlockGun();
+    if (m.onDone === 'sports' && this.hooks.unlockSports) this.hooks.unlockSports();
+    if (this.hooks.setStandoff) this.hooks.setStandoff(null);
+    this.index++;
+    this.stage = 0;
+    this.holdTimer = 0;
+    // THE fix: always return to idle, from which the next mission starts.
     this.state = 'idle';
-    this.idleT = 0;
-    this.holdT = 0;
-    this.beam.visible = false;
-    this.ring.visible = false;
-    if (this.missionsDone === 1) this.mara.visible = false;
-    if (this.missionsDone >= this.defs.length) {
-      this.game.storyComplete();
+    this.beacon.visible = false;
+    this.mara.visible = false;
+    if (this.index >= STORY.length) {
+      this.state = 'complete';
+      if (this.hooks.toast) this.hooks.toast('Story complete — you own Neon Bay.');
+      if (this.hooks.onStoryComplete) this.hooks.onStoryComplete();
     } else {
-      this.game.saveGame();
+      this.nextDelay = 1.6;
     }
   }
 
-  update(dt) {
-    const game = this.game;
+  update(dt, px, pz, inCar) {
+    // A shot can pin the beacon somewhere the mission logic would not.
+    if (this.beaconOverride) {
+      this.beacon.visible = true;
+      this.beacon.position.set(this.beaconOverride.x, 0, this.beaconOverride.z);
+      this.beacon.rotation.y += dt * 0.6;
+    } else {
+      // Beacon follows the current target.
+      const target = this.beaconTarget();
+      if (target) {
+        this.beacon.visible = true;
+        this.beacon.position.set(target.x, 0, target.z);
+        this.beacon.rotation.y += dt * 0.6;
+      } else {
+        this.beacon.visible = false;
+      }
+    }
+    if (!this.started) return;
     if (this.state === 'idle') {
-      if (this.missionsDone < this.defs.length) {
-        this.idleT += dt;
-        if (this.idleT >= CONFIG.missionDelay) this.startNext();
+      if (this.index < STORY.length) {
+        this.nextDelay -= dt;
+        if (this.nextDelay <= 0) this.startMission(this.index);
       }
       return;
     }
-    const s = this.current.stages[this.stageI];
-    const p = game.player;
-    if (s.type === 'steal') {
-      if (p.inCar) this.advance();
+    if (this.state !== 'active') return;
+    const m = this.current;
+    const stage = m.stages[this.stage];
+    if (!stage) { this.complete(); return; }
+    // A stage that only needs the player to be in a car.
+    if (stage.needsCar) {
+      if (inCar) {
+        this.stage++;
+        if (this.hooks.toast) this.hooks.toast('Car stolen. Now drive it to the garage.');
+      }
       return;
     }
-    if (s.type === 'hold') {
-      const d = Math.hypot(p.x - s.x, p.z - s.z);
-      if (d < s.r) {
-        this.holdT += dt;
-        // The ring shrinks as the hold runs down.
-        this.ring.scale.setScalar(((s.r || 10) / 8) * (1 - (this.holdT / CONFIG.holdSeconds) * 0.35));
-        if (this.holdT >= CONFIG.holdSeconds) {
-          game.police.holdPos = null;
-          game.police.setHeat(80); // 4 stars for the escape
-          this.advance();
+    const d = Math.hypot(px - stage.x, pz - stage.z);
+    if (stage.hold) {
+      // Vault hold: the timer only runs inside the ring.
+      if (d <= stage.radius) {
+        this.holdTimer += dt;
+        if (this.hooks.setStandoff && !this.standoffOn) {
+          this.standoffOn = true;
+          this.hooks.setStandoff({ x: stage.x, z: stage.z });
         }
+        if (this.holdTimer >= stage.hold) {
+          this.standoffOn = false;
+          if (this.hooks.setStandoff) this.hooks.setStandoff(null);
+          if (this.hooks.setWanted) this.hooks.setWanted(4);
+          if (this.hooks.toast) this.hooks.toast('Vault cracked — $8,000. Lose the heat at the Marina!');
+          this.stage++;
+          this.holdTimer = 0;
+        }
+      } else {
+        this.holdTimer = Math.max(0, this.holdTimer - dt * 0.5);
       }
       return;
     }
-    // meet / reach
-    const d = Math.hypot(p.x - s.x, p.z - s.z);
-    if (d < s.r && (!s.needCar || p.inCar)) this.advance();
+    if (d <= stage.radius) {
+      this.stage++;
+      if (this.stage >= m.stages.length) this.complete();
+    }
+  }
+
+  // Debug/test: jump straight to a mission.
+  debugStart(i) {
+    this.started = true;
+    this.index = i;
+    this.state = 'idle';
+    this.nextDelay = 0;
   }
 }

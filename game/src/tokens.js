@@ -1,58 +1,79 @@
-// Twelve neon tokens hidden around the city, $50 each. A spinning cyan
-// torus that floats above the ground; driving or walking through one
-// collects it. Collected tokens persist in the save.
-import * as THREE from 'three';
-import { CONFIG } from './config.js';
+// Neon Bay — 12 collectible neon tokens, $50 each, spinning above the
+// streets. The HUD counts them; the save file remembers them.
 
-const SPOTS = [
-  [74, 74], [-74, 148], [222, -74], [-222, 74],
-  [148, -222], [-148, -222], [0, 296], [296, 148],
-  [-296, -148], [74, -296], [-222, 296], [222, 296],
-];
+import * as THREE from 'three';
+import { CFG } from './config.js';
+import { Rng } from './rng.js';
 
 export class Tokens {
   constructor(scene) {
     this.scene = scene;
-    this.list = [];
+    this.rng = new Rng(4242);
+    this.items = [];
     this.collected = 0;
-    const geo = new THREE.TorusGeometry(1.1, 0.28, 10, 20);
-    for (let i = 0; i < CONFIG.tokenCount; i++) {
-      const [x, z] = SPOTS[i % SPOTS.length];
-      const mat = new THREE.MeshBasicMaterial({ color: 0x2ee6ff });
+    this.group = new THREE.Group();
+    scene.add(this.group);
+    this.build();
+  }
+
+  build() {
+    const rng = this.rng;
+    const geo = new THREE.TorusGeometry(0.9, 0.22, 10, 20);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x2ad4ff });
+    const placed = [];
+    for (let i = 0; i < CFG.tokenCount; i++) {
+      // Spread across the city, on roads where the player actually goes.
+      let x, z, tries = 0;
+      do {
+        const a = rng.pick([-320, -240, -160, -80, 0, 80, 160, 240, 320]);
+        const along = rng.float(-300, 300);
+        if (rng.chance(0.5)) { x = along; z = a; } else { x = a; z = along; }
+        tries++;
+      } while (tries < 20 && placed.some((p) => Math.hypot(p.x - x, p.z - z) < 60));
+      placed.push({ x, z });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(x, 1.6, z);
-      scene.add(mesh);
-      this.list.push({ id: i, x, z, taken: false, mesh, phase: i * 0.7 });
+      this.group.add(mesh);
+      // A soft glow ring under each token.
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.9, 1.3, 24),
+        new THREE.MeshBasicMaterial({ color: 0x2ad4ff, transparent: true, opacity: 0.4, side: THREE.DoubleSide }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(x, 0.12, z);
+      this.group.add(ring);
+      this.items.push({ mesh, ring, x, z, taken: false, phase: rng.float(0, Math.PI * 2) });
     }
   }
 
-  reset(takenIds = []) {
-    this.collected = 0;
-    for (const t of this.list) {
-      t.taken = takenIds.includes(t.id);
-      t.mesh.visible = !t.taken;
-      if (t.taken) this.collected++;
-    }
-  }
-
-  update(dt, game) {
-    const p = game.player;
-    for (const t of this.list) {
+  update(dt, time, px, pz, onCollect) {
+    for (const t of this.items) {
       if (t.taken) continue;
       t.mesh.rotation.y += dt * 1.8;
-      t.mesh.position.y = 1.6 + Math.sin(game.time * 2 + t.phase) * 0.25;
-      const car = p.inCar;
-      const dx = (car ? car.x : p.x) - t.x;
-      const dz = (car ? car.z : p.z) - t.z;
-      if (Math.hypot(dx, dz) < 3.5) {
+      t.mesh.position.y = 1.6 + Math.sin(time * 2 + t.phase) * 0.25;
+      if (Math.hypot(t.x - px, t.z - pz) < 2.4) {
         t.taken = true;
         t.mesh.visible = false;
+        t.ring.visible = false;
         this.collected++;
-        game.cash += CONFIG.tokenValue;
-        game.audio.pickup();
-        game.effects.burst(t.x, 1.6, t.z, 0x2ee6ff, 14, 4, 3, 0.7);
-        game.hud.toast(`Neon token +$${CONFIG.tokenValue}  (${this.collected} / ${CONFIG.tokenCount})`);
+        if (onCollect) onCollect(t);
       }
     }
+  }
+
+  // Restore collected state from a save (indices of taken tokens).
+  setCollected(indices) {
+    for (const i of indices) {
+      if (this.items[i] && !this.items[i].taken) {
+        this.items[i].taken = true;
+        this.items[i].mesh.visible = false;
+        this.items[i].ring.visible = false;
+        this.collected++;
+      }
+    }
+  }
+
+  takenIndices() {
+    return this.items.map((t, i) => (t.taken ? i : -1)).filter((i) => i >= 0);
   }
 }

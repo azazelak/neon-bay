@@ -1,96 +1,104 @@
-// Deterministic screenshot scenes, driven by ?shot=<name>&seed=1.
-// Each one stages a real game state — a chase, a street, a mission, the
-// skyline — warms the simulation up for a few seconds, and hides the
-// menus so the shot shows the game itself. The screenshots are taken by
-// the headless harness from these exact states.
-import { CONFIG } from './config.js';
+// Neon Bay — the 4 deterministic screenshot scenes (?shot=...&seed=7).
+// Each one warms the simulation up for 2 s, THEN poses the player
+// elements (a rolling car would otherwise drift during warm-up), and
+// hands the camera to a fixed spot. Shots (new names for v3c):
+//   pursuit — 3-star chase, roadblock ahead, cover shot
+//   corner  — Rico on foot at a crosswalk, Mara in the beacon ring
+//   heist   — Bay Run checkpoint 1, sedan 16 m out
+//   marina  — wide dusk skyline: pier, boats, ocean, sun, MARINA board
 
-export function setupShot(game, name) {
-  game.startNewGame();
-  game.hud.hideAll();
-  const rig = game.rig;
-  rig.lastDragT = 1e9; // keep the staged camera where we put it
+import { PLACES } from './config.js';
 
-  if (name === 'chase') {
-    // Rico in the orange sports car on Ocean Drive, 3 stars, a roadblock
-    // pair ahead and cruisers closing from behind. Mission 1's garage run
-    // is the objective on the HUD.
-    const m = game.missions;
-    m.missionsDone = 0;
-    m.startNext();
-    m.stageI = 2;
-    m.setStageText();
-    const sports = game.spawnSportsCarAt(0, 120, Math.PI);
-    game.putPlayerInCar(sports);
-    game.police.setHeat(60);
-    game.police.spawnCruiser(0, 168, Math.PI);
-    game.police.spawnCruiser(4, 182, Math.PI);
-    // Roadblock right ahead: two cruisers angled across the road, 12 m up,
-    // plus a third bearing down the oncoming lane — the cover reads as an
-    // interception, not an empty street.
-    for (const [off, ang] of [[-2, 0.45], [2, -0.45]]) {
-      const e = game.police.spawnCruiser(off, 108, Math.PI / 2 + ang);
-      e.state = 'block';
-      e.blockT = 30;
+const SHOT_NAMES = ['pursuit', 'corner', 'heist', 'marina'];
+
+export function shotList() { return SHOT_NAMES; }
+
+export function applyShot(game, name) {
+  const g = game;
+  g.mode = 'play';
+  g.hud.hideScreens();
+  g.audio.ensure();
+  if (name === 'pursuit') {
+    // Rico in the orange sports car, northbound on the centre avenue,
+    // 3 stars, two cruisers blocking the road 45 m ahead.
+    g.missions.debugStart(0);
+    g.missions.started = true;
+    g.missions.index = 0;
+    g.missions.state = 'active';
+    g.missions.stage = 1; // "Drive the car to Mara's garage"
+    g.player.place(0, 150, 0);
+    const car = g.spawnPlayerCar('sports', 0xff7a1a, 0, 150, 0);
+    g.police.setWanted(3);
+    g.police.layRoadblock(car);
+    g.warmup(2);
+    // Pose after warm-up: the car rolls during the sim, so put it back.
+    // Tight chase cam: sit the car 9 m short of the roadblock (laid
+    // 45 m ahead of the spawn point) and keep its speed low (5 m/s) so
+    // the harness's 600 ms wait only rolls it a couple of metres — the
+    // car stays large in the lower frame and the two roadblock cruisers
+    // fill the middle of the frame instead of sitting tiny at 45 m.
+    // Camera off to the right: a chaser cruiser rides the player's
+    // bumper, and from dead behind it hides the orange car — from the
+    // side the chaser separates to the left edge and the player's car
+    // reads on its own. (No tail cruiser added: the two spawned
+    // chasers plus the roadblock give the police presence.)
+    car.place(0, 114, 0);
+    car.speed = 5;
+    g.render.setFree(6.5, 3.2, 122, 0, 1.6, 106);
+  } else if (name === 'corner') {
+    // On foot at the centre crosswalk; Mara waits in the beacon ring and
+    // a taxi rolls through the intersection on the green light.
+    g.missions.debugStart(0);
+    g.missions.started = true;
+    g.missions.index = 0;
+    g.missions.state = 'active';
+    g.missions.stage = 0; // "Steal a car"
+    g.player.place(2, -4, Math.PI);
+    g.missions.mara.visible = true;
+    g.missions.mara.position.set(9, 0, -9);
+    g.missions.beaconOverride = { x: 9, z: -9 };
+    g.warmup(2);
+    // Drive one traffic car through the frame.
+    const t = g.traffic.cars.find((c) => c.horiz && c.avenue === 0);
+    if (t) {
+      t.car.place(-46, 0, -Math.PI / 2);
+      t.car.speed = 10;
+      t.speed = 10;
+      t.dir = 1;
     }
-    const headOn = game.police.spawnCruiser(-6, 106, -0.3);
-    headOn.state = 'block';
-    headOn.blockT = 30;
-    rig.distOverride = 7;
-    // The car heads north (heading PI), so the chase camera sits south of
-    // it: yaw 0 puts the camera behind the car, looking north at the
-    // roadblock ahead. (Yaw PI would put the camera in front of the car.)
-    rig.yaw = 0;
-    rig.pitch = 0.18;
-    return;
+    g.render.setFree(16, 4.5, 16, 0, 1.5, -8);
+  } else if (name === 'heist') {
+    // Bay Run: the sedan sits 16 m short of checkpoint 1 on Ocean Drive,
+    // beacon ahead, 2 stars on the HUD, full magazine.
+    g.missions.debugStart(1);
+    g.missions.started = true;
+    g.missions.index = 1;
+    g.missions.state = 'active';
+    g.missions.stage = 1; // "Checkpoint 1 of 3 — Ocean Drive"
+    g.combat.giveGun();
+    g.player.place(-160, 338, 0);
+    const car = g.spawnPlayerCar('sedan', 0x3a6ab0, -160, 338, 0);
+    g.police.setWanted(2);
+    g.warmup(2);
+    // Pose after warm-up: the car would otherwise roll into the ring
+    // and advance the stage to checkpoint 2. Sit 20 m out: even after
+    // the harness's wait the car stays outside the 10 m radius.
+    car.place(-160, 340, 0);
+    car.speed = 14;
+    g.render.setFree(-156, 3.2, 350, -160, 1.8, 322);
+  } else if (name === 'marina') {
+    // Wide dusk skyline from the sand: the pier runs out to the hut,
+    // boats bob beside it, the sun hangs over the ocean and the MARINA
+    // billboard reads at the pier root.
+    g.missions.debugStart(0);
+    g.missions.started = true;
+    g.missions.index = 0;
+    g.missions.state = 'active';
+    g.missions.stage = 0;
+    g.player.place(60, 350, Math.PI * 0.75);
+    g.warmup(2);
+    g.render.setFree(156, 8, 378, 108, 4, 448);
   }
-
-  if (name === 'street') {
-    // Rico on foot at the downtown crosswalk, Mara waiting at the corner,
-    // a taxi and a van rolling past, pedestrians on the sidewalk.
-    game.player.reset(12, 16, Math.PI * 0.75);
-    const taxi = game.traffic.cars.find((t) => t.car.kind === 'taxi');
-    if (taxi) { taxi.car.x = -6; taxi.car.z = -18; taxi.tx = -6; taxi.tz = 222; taxi.car.heading = 0; }
-    const van = game.traffic.cars.find((t) => t.car.kind === 'van');
-    if (van) { van.car.x = 6; van.car.z = 34; van.tx = 6; van.tz = -222; van.car.heading = Math.PI; }
-    rig.yaw = 0.99;
-    rig.pitch = 0.22;
-    return;
-  }
-
-  if (name === 'mission') {
-    // Bay Run, checkpoint 1: Rico in a sedan just short of the checkpoint
-    // ring on Ocean Drive, 2 stars, pistol loaded.
-    const m = game.missions;
-    m.missionsDone = 1;
-    m.startNext();
-    m.stageI = 1;
-    m.setStageText();
-    game.combat.giveGun();
-    const sedan = game.traffic.parked.find((c) => c.kind === 'sedan') || game.traffic.parked[0];
-    sedan.x = 132;
-    sedan.z = 222;
-    sedan.heading = Math.PI / 2;
-    sedan.syncMesh();
-    game.putPlayerInCar(sedan);
-    game.police.setHeat(30);
-    rig.distOverride = 9.5;
-    rig.yaw = -Math.PI / 2;
-    rig.pitch = 0.3;
-    return;
-  }
-
-  if (name === 'skyline') {
-    // WIDE dusk skyline from the beach: the marina pier and its bobbing
-    // boats, the ocean horizon, the sun disc, and the MARINA billboard
-    // readable in frame. 1 star for a little life.
-    game.police.setHeat(10);
-    const cruiser = game.police.spawnCruiser(-222, 148, 0);
-    if (cruiser) { cruiser.car.speed = 12; }
-    // Free camera: low on the sand, aimed down the pier to the west.
-    game.freeCam = {
-      pos: { x: -290, y: 12, z: 238 },
-      look: { x: -420, y: 5, z: 215 },
-    };
-  }
+  g.render.render();
+  window.__shotReady = true;
 }

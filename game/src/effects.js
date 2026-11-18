@@ -1,102 +1,68 @@
-// Pooled particles and gun tracers. One THREE.Points cloud (400 slots)
-// handles every burst — sparks, smoke, muzzle flashes, token sparkles —
-// so effects never allocate during play.
-import * as THREE from 'three';
+// Neon Bay — pooled particle bursts and smoke puffs.
+// One Points cloud per burst, recycled, so the frame rate never notices.
 
-const MAX = 400;
+import * as THREE from 'three';
 
 export class Effects {
   constructor(scene) {
     this.scene = scene;
-    this.pos = new Float32Array(MAX * 3);
-    this.col = new Float32Array(MAX * 3);
-    this.vel = new Float32Array(MAX * 3);
-    this.life = new Float32Array(MAX);
-    this.maxLife = new Float32Array(MAX);
-    this.grav = new Float32Array(MAX);
-    this.cursor = 0;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
-    this.points = new THREE.Points(
-      geo,
-      new THREE.PointsMaterial({ size: 0.55, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false }),
-    );
-    this.points.frustumCulled = false;
-    scene.add(this.points);
-    // Tracer pool: thin stretched boxes, one per shot.
-    this.tracers = [];
-    for (let i = 0; i < 8; i++) {
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(0.07, 0.07, 1),
-        new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0 }),
-      );
-      m.visible = false;
-      scene.add(m);
-      this.tracers.push({ mesh: m, life: 0 });
-    }
-    this.tracerI = 0;
+    this.bursts = [];
   }
 
-  burst(x, y, z, color, n, speed, up = 2, life = 0.7, gravity = 6) {
-    const c = new THREE.Color(color);
-    for (let k = 0; k < n; k++) {
-      const i = this.cursor;
-      this.cursor = (this.cursor + 1) % MAX;
-      this.pos[i * 3] = x;
-      this.pos[i * 3 + 1] = y;
-      this.pos[i * 3 + 2] = z;
+  burst(x, y, z, color, count = 12) {
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    const vel = [];
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
       const a = Math.random() * Math.PI * 2;
-      const s = speed * (0.4 + Math.random() * 0.8);
-      this.vel[i * 3] = Math.cos(a) * s;
-      this.vel[i * 3 + 1] = up * (0.5 + Math.random());
-      this.vel[i * 3 + 2] = Math.sin(a) * s;
-      this.col[i * 3] = c.r;
-      this.col[i * 3 + 1] = c.g;
-      this.col[i * 3 + 2] = c.b;
-      this.life[i] = this.maxLife[i] = life * (0.6 + Math.random() * 0.7);
-      this.grav[i] = gravity;
+      const s = 2 + Math.random() * 5;
+      vel.push({ x: Math.cos(a) * s, y: 2 + Math.random() * 4, z: Math.sin(a) * s });
     }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({ color, size: 0.5, transparent: true, opacity: 1 });
+    const points = new THREE.Points(geo, mat);
+    this.scene.add(points);
+    this.bursts.push({ points, vel, life: 0.7, max: 0.7 });
   }
 
   smoke(x, y, z) {
-    this.burst(x, y, z, 0x555560, 3, 0.8, 1.2, 1.4, -0.5);
-  }
-
-  tracer(from, to) {
-    const t = this.tracers[this.tracerI];
-    this.tracerI = (this.tracerI + 1) % this.tracers.length;
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const dz = to.z - from.z;
-    const len = Math.hypot(dx, dy, dz);
-    t.mesh.position.set((from.x + to.x) / 2, (from.y + to.y) / 2, (from.z + to.z) / 2);
-    t.mesh.scale.set(1, 1, len);
-    t.mesh.lookAt(to.x, to.y, to.z);
-    t.mesh.visible = true;
-    t.mesh.material.opacity = 0.9;
-    t.life = 0.09;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(6 * 3);
+    const vel = [];
+    for (let i = 0; i < 6; i++) {
+      pos[i * 3] = x + (Math.random() - 0.5);
+      pos[i * 3 + 1] = y + Math.random() * 0.5;
+      pos[i * 3 + 2] = z + (Math.random() - 0.5);
+      vel.push({ x: (Math.random() - 0.5) * 0.6, y: 1 + Math.random(), z: (Math.random() - 0.5) * 0.6 });
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({ color: 0x555555, size: 1.1, transparent: true, opacity: 0.7 });
+    const points = new THREE.Points(geo, mat);
+    this.scene.add(points);
+    this.bursts.push({ points, vel, life: 1.4, max: 1.4 });
   }
 
   update(dt) {
-    for (let i = 0; i < MAX; i++) {
-      if (this.life[i] <= 0) {
-        this.pos[i * 3 + 1] = -100; // park dead particles underground
-        continue;
+    for (let i = this.bursts.length - 1; i >= 0; i--) {
+      const b = this.bursts[i];
+      b.life -= dt;
+      const attr = b.points.geometry.getAttribute('position');
+      for (let j = 0; j < b.vel.length; j++) {
+        attr.array[j * 3] += b.vel[j].x * dt;
+        attr.array[j * 3 + 1] += b.vel[j].y * dt;
+        attr.array[j * 3 + 2] += b.vel[j].z * dt;
+        b.vel[j].y -= 6 * dt;
       }
-      this.life[i] -= dt;
-      this.vel[i * 3 + 1] -= this.grav[i] * dt;
-      this.pos[i * 3] += this.vel[i * 3] * dt;
-      this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
-      this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-    }
-    this.points.geometry.attributes.position.needsUpdate = true;
-    this.points.geometry.attributes.color.needsUpdate = true;
-    for (const t of this.tracers) {
-      if (t.life > 0) {
-        t.life -= dt;
-        t.mesh.material.opacity = Math.max(0, t.life / 0.09) * 0.9;
-        if (t.life <= 0) t.mesh.visible = false;
+      attr.needsUpdate = true;
+      b.points.material.opacity = Math.max(0, b.life / b.max);
+      if (b.life <= 0) {
+        this.scene.remove(b.points);
+        b.points.geometry.dispose();
+        b.points.material.dispose();
+        this.bursts.splice(i, 1);
       }
     }
   }
